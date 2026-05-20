@@ -1,0 +1,30 @@
+# GOAL
+
+# FlexBE Synthesis request passed to the synthesis manager
+FlexBESynthesisRequest request
+
+# FlexBE Synthesis options as yaml dictionary string
+string synthesis_options
+
+---
+
+# RESULT
+
+# An error code reflecting what went wrong
+SynthesisErrorCode error_code
+
+# The synthesized behavior as a list of state instantiation descriptions
+flexbe_msgs/StateInstantiation[] states
+
+# Human-readable messages collected during synthesis (warnings, errors, diagnostics)
+string[] messages
+
+---
+
+# FEEDBACK
+
+# The internal state that the Behavior Synthesis action currently is in
+string status
+
+# The progress of the synthesis process, from 0 (started) to 1 (completed)
+float32 progress

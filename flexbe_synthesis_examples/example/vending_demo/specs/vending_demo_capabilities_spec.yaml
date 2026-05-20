@@ -1,0 +1,9 @@
+# Sample specs from Hayhurst and Conner paper in yaml format
+spec_name: "vending_demo"
+specs:
+    OUTPUT:
+      - "prep_pay_a"
+      - "item:0...3"
+    SYS_INIT:
+      - "prep_pay_a"  # Define the initial action
+      - "item=0"

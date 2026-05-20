@@ -1,0 +1,20 @@
+/data:
+    spec_name: 'req:spec_name'        # Use name assigned by request, or string here
+    spec_path: 'ros:spec_path'        # Use ROS 2 parameter or full path here
+    verbose: 'ros:verbose'            # pass verbose:=true at launch to enable diagnostic output
+    synthesis_timeout_s: 60.0         # Override default 15-minute Slugs timeout for examples
+    use_fallback_layout: false        # set true to skip pygraphviz layout (faster, lower quality)
+    reduced_automaton_name: 'coffee_automaton_reduced'
+    mealy_graph_config:
+        draw_graph: true
+        layout: 'dot'
+        splines: true
+        initial_state: true
+        font_size: 6
+        penwidth: 2.0
+        env_node_size: 0.4
+        sys_node_size: 0.1
+        dpi: 150
+        show_node_ids: true
+        sys_choice_edge_color: 'green'
+        env_choice_edge_color: 'red'

@@ -1,0 +1,149 @@
+output_variables:
+- beer_a
+- beer_m
+- failed
+- finished
+- pay_a
+- prep_pay_a
+- select_a
+- soda_a
+- soda_m
+input_variables:
+- beer_c
+- beer_f
+- pay_c
+- pay_f
+- prep_pay_c
+- prep_pay_f
+- select_c
+- select_f
+- soda_c
+- soda_f
+automaton:
+- name: '0'
+  output_valuation: 0
+  input_valuation: 16
+  transitions:
+  - '1'
+  rank: 0
+  output_variables: []
+  input_variables:
+  - prep_pay_c
+  output_values: {}
+  input_values: {}
+  incoming: []
+- name: '1'
+  output_valuation: 16
+  input_valuation: 16
+  transitions:
+  - '2'
+  - '1'
+  - '3'
+  rank: 0
+  output_variables:
+  - pay_a
+  input_variables:
+  - prep_pay_c
+  output_values: {}
+  input_values: {}
+  incoming:
+  - '0'
+  - '1'
+- name: '2'
+  output_valuation: 4
+  input_valuation: 24
+  transitions:
+  - '2'
+  rank: 0
+  output_variables: []
+  input_variables:
+  - pay_f
+  - prep_pay_c
+  output_values:
+    failed: true
+  input_values: {}
+  incoming:
+  - '1'
+  - '2'
+- name: '3'
+  output_valuation: 64
+  input_valuation: 4
+  transitions:
+  - '4'
+  - '3'
+  - '5'
+  rank: 0
+  output_variables:
+  - select_a
+  input_variables:
+  - pay_c
+  output_values: {}
+  input_values: {}
+  incoming:
+  - '1'
+  - '3'
+- name: '4'
+  output_valuation: 128
+  input_valuation: 64
+  transitions:
+  - '4'
+  - '7'
+  - '6'
+  rank: 0
+  output_variables:
+  - soda_a
+  input_variables:
+  - select_c
+  output_values: {}
+  input_values: {}
+  incoming:
+  - '3'
+  - '4'
+- name: '5'
+  output_valuation: 4
+  input_valuation: 132
+  transitions:
+  - '5'
+  rank: 0
+  output_variables: []
+  input_variables:
+  - pay_c
+  - select_f
+  output_values:
+    failed: true
+  input_values: {}
+  incoming:
+  - '3'
+  - '5'
+- name: '6'
+  output_valuation: 264
+  input_valuation: 256
+  transitions:
+  - '6'
+  rank: 0
+  output_variables:
+  - finished
+  input_variables:
+  - soda_c
+  output_values:
+    soda_m: true
+  input_values: {}
+  incoming:
+  - '4'
+  - '6'
+- name: '7'
+  output_valuation: 4
+  input_valuation: 576
+  transitions:
+  - '7'
+  rank: 0
+  output_variables: []
+  input_variables:
+  - select_c
+  - soda_f
+  output_values:
+    failed: true
+  input_values: {}
+  incoming:
+  - '4'
+  - '7'

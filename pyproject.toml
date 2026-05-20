@@ -1,0 +1,46 @@
+[tool.ruff]
+required-version = ">=0.15.12"
+line-length = 135
+indent-width = 4
+target-version = "py310"
+exclude = ["build", "install", "log", ".git"]
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "space"
+line-ending = "auto"
+skip-magic-trailing-comma = false
+docstring-code-format = false
+
+[tool.ruff.lint]
+preview = true
+select = ["E", "W", "F", "D", "I", "Q", "UP"]
+ignore = [
+  "D100",
+  "D104",
+]
+extend-ignore = ["E203"]
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.ruff.lint.flake8-quotes]
+inline-quotes = "single"
+multiline-quotes = "double"
+docstring-quotes = "double"
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+default-section = "first-party"
+detect-same-package = false
+force-sort-within-sections = true
+order-by-type = false
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+"test/*" = ["D"]
+"*/__init__.py" = ["F401"]

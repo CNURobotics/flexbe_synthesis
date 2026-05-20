@@ -1,0 +1,5 @@
+repositories:
+  flexbe_behavior_engine:
+    type: git
+    url: https://github.com/FlexBE/flexbe_behavior_engine.git
+    version: ros2-devel

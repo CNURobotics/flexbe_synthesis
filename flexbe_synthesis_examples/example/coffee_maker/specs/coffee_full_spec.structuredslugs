@@ -1,0 +1,32 @@
+# Sample specs from:
+# https://www2.eecs.berkeley.edu/Pubs/TechRpts/2013/EECS-2013-162.pdf
+# https://ruediger-ehlers.de/blog/introtoreactivesynthesis.html
+
+#"coffee-full_spec"
+[INPUT]
+bu
+
+[OUTPUT]
+br
+gr
+
+[ENV_INIT]
+# This is a comment
+
+[SYS_INIT]
+gr <-> bu
+! br
+
+[SYS_TRANS]
+br' <--> gr
+gr' -> bu'
+
+[ENV_TRANS]
+bu' -> !gr & !br
+
+# Requires these liveness conditions to work properly
+[SYS_LIVENESS]
+br
+
+[ENV_LIVENESS]
+bu

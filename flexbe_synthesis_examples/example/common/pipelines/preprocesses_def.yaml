@@ -1,0 +1,63 @@
+# Preprocess pipeline (runs once at server startup):
+#   workspace_crawler → state_mappings (global) → state_mappings (custom) → workspace_parser
+#   → capability_loader → generate_transition_relations → generate_discrete_abstraction
+
+/pipeline:
+    - entry_point:
+        name: workspace_crawler
+        outputs:
+            workspace_errors: list
+    - entry_point:
+        name: state_mappings
+        inputs:
+            global_mappings_path: FilePathStr
+            state_mappings: Mappings
+        outputs:
+            state_mappings: Mappings
+    - entry_point:
+        name: state_mappings
+        inputs:
+            custom_mappings_path: FilePathStr
+            state_mappings: Mappings
+        outputs:
+            state_mappings: Mappings
+    - entry_point:
+        name: workspace_parser
+        inputs:
+            state_mappings: Mappings
+        outputs:
+            workspace_data: WorkspaceData
+            workspace_skipped: list
+    - entry_point:
+        name: capability_loader
+        inputs:
+            system_name: NameStr
+            capabilities_path: FilePathStr
+            workspace_data: WorkspaceData
+            state_mappings: Mappings
+        outputs:
+            system_capabilities: SystemCapabilities
+            state_implementations_used: StateImplementationsUsed
+            behaviors_used: BehaviorsUsed
+    - entry_point:
+        name: generate_transition_relations
+        inputs:
+            system_name: NameStr
+            system_capabilities: SystemCapabilities
+            state_implementations_used: StateImplementationsUsed
+            behaviors_used: BehaviorsUsed
+            workspace_data: WorkspaceData
+        outputs:
+            system_capabilities: SystemCapabilities
+            system_transitions: SystemTransitions
+            system_preconditions: SystemPreconditions
+            system_postconditions: SystemPostconditions
+            state_implementations_used: StateImplementationsUsed
+            behaviors_used: BehaviorsUsed
+    - entry_point:
+        name: generate_discrete_abstraction
+        inputs:
+            system_name: NameStr
+            system_capabilities: SystemCapabilities
+            state_implementations_used: StateImplementationsUsed
+            behaviors_used: BehaviorsUsed

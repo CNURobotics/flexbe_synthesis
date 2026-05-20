@@ -1,0 +1,3 @@
+/data:
+    automaton_path: ros:automaton_path  # resolved from the ROS 2 'automaton_path' launch parameter
+    use_fallback_layout: false      # set true to skip pygraphviz layout (faster, lower quality)

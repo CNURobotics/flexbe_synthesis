@@ -1,0 +1,14 @@
+# Sample specs from Hayhurst and Conner paper in yaml format
+spec_name: "coffee_maker"
+# specs: is intentionally null here. The capability pipeline generates the full
+# GR(1) spec from the capabilities definition; no hand-written spec sections are
+# needed. A null specs field is accepted by the loader (merge is skipped).
+specs:
+#    INPUT:
+#      - "outcome:0...1"
+#    OUTPUT:
+#      - "capability:0...3"
+#    ENV_INIT:
+#      - "outcome=0"  # Define the initial action
+#    SYS_INIT:
+#      - "capability=0"
