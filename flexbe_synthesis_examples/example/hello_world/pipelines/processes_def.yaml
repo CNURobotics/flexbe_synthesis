@@ -1,0 +1,20 @@
+# Process pipeline (runs per synthesis request):
+#   sm_loader → sm_layout
+
+/pipeline:
+    - entry_point:
+        name: sm_loader
+        inputs:
+            automaton_path: FilePathStr
+        outputs:
+            state_defn: List[StateInstantiation]
+            error_code: SynthesisErrorCode
+    - entry_point:
+        name: sm_layout
+        inputs:
+            state_defn: List[StateInstantiation]
+            specs_output_dir_path: FilePathStr
+            use_fallback_layout: bool
+        outputs:
+            state_defn: List[StateInstantiation]
+            error_code: SynthesisErrorCode

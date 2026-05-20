@@ -1,0 +1,54 @@
+name: Bug Report
+description: Report a reproducible problem in FlexBE Synthesis.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve FlexBE Synthesis. Please include enough detail for maintainers to reproduce the issue.
+  - type: input
+    id: ros_distro
+    attributes:
+      label: ROS 2 distribution
+      placeholder: Jazzy, Rolling, etc.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, workspace layout, and relevant sourced overlays.
+      placeholder: Ubuntu 24.04, Python 3.12, ROS 2 Jazzy, sourced install/setup.bash
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Commands, launch files, YAML inputs, or action requests that trigger the problem.
+      placeholder: |
+        1. Build with ...
+        2. Run ...
+        3. Send request ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include logs, tracebacks, and `colcon test-result --verbose` output when relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Attach or link any minimal YAML/spec files needed to reproduce the issue.

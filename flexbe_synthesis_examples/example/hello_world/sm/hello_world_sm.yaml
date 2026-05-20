@@ -1,0 +1,32 @@
+# FlexBE state machine definition for the hello_world demo.
+# Loaded by the generic sm_loader process plugin.
+#
+# 'sm' describes the top-level state machine container.
+# 'states' lists each interior state in order.
+sm:
+  outcomes:
+    - finished
+  initial_state: SayHello
+
+states:
+  - name: SayHello
+    state_class: LogState
+    parameters:
+      text: "'Hello'"
+    outcomes:
+      - done
+    transitions:
+      - SayWorld
+    autonomy:
+      - 1
+
+  - name: SayWorld
+    state_class: LogState
+    parameters:
+      text: "'World'"
+    outcomes:
+      - done
+    transitions:
+      - finished
+    autonomy:
+      - 1

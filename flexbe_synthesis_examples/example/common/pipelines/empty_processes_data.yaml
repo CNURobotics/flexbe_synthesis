@@ -1,0 +1,3 @@
+/data:
+    spec_name: 'req:spec_name'       # Use name assigned by request, or string here
+    spec_path: 'ros:spec_path'       # Use ROS 2 parameter or full path here

@@ -1,0 +1,5 @@
+/data:
+    system_name: 'vending_demo'
+    capabilities_path: 'ros:capabilities_path'        # Get from ROS2 parameter or full path here
+    global_mappings_path: 'ros:global_mappings_path'  # Get from ROS2 parameter or full path here
+    custom_mappings_path: 'ros:custom_mappings_path'  # Get from ROS2 parameter or full path here

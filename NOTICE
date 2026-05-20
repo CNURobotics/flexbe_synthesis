@@ -1,0 +1,10 @@
+FlexBE Synthesis
+
+Copyright 2026 Christopher Newport University
+Capable Humanitarian Robotics and Intelligent Systems Lab (CHRISLAB)
+
+This repository is primarily licensed under Apache-2.0. The
+`flexbe_synthesis_slugs` package also bundles structured Slugs parser code
+under a BSD-style license. See
+`flexbe_synthesis_slugs/THIRD_PARTY_LICENSES.md` and the parser license file at
+`flexbe_synthesis_slugs/flexbe_synthesis_slugs/helpers/structured_slugs_parser/LICENSE.txt`.

@@ -1,0 +1,23 @@
+# Minimal capability demo for a two-step sequential task.
+# Intended for the generic preprocessing path only (capability loader,
+# discrete abstraction, transition relations). It is not a Slugs synthesis
+# target.
+name: 'hello_world'
+
+capabilities:
+    say_hello:
+        interface: LogState
+        parameters:
+            text: "Hello"
+        preconditions:
+            - '!say_hello'
+        postconditions:
+            - say_hello
+    say_world:
+        interface: LogState
+        parameters:
+            text: "World"
+        preconditions:
+            - say_hello
+        postconditions:
+            - say_world

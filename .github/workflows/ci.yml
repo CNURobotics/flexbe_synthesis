@@ -1,0 +1,45 @@
+name: ROS 2 CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - devel
+  workflow_dispatch:
+
+jobs:
+  build_and_test:
+    name: ${{ matrix.ros-distro }} build and test
+    runs-on: ubuntu-latest
+    env:
+      FLEXBE_SYNTHESIS_HOME: /tmp/flexbe_synthesis
+    strategy:
+      fail-fast: false
+      matrix:
+        ros-distro: [jazzy, kilted]
+    container:
+      image: ubuntu:noble
+
+    steps:
+      - name: Build and test packages
+        id: ros_ci
+        uses: ros-tooling/action-ros-ci@v0.4
+        with:
+          package-name: |
+            flexbe_synthesis
+            flexbe_synthesis_msgs
+            flexbe_synthesis_core
+            flexbe_synthesis_generic
+            flexbe_synthesis_slugs
+            flexbe_synthesis_examples
+          target-ros2-distro: ${{ matrix.ros-distro }}
+          coverage-result: false
+
+      - name: Upload colcon logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: colcon-logs-${{ matrix.ros-distro }}
+          path: ${{ steps.ros_ci.outputs.ros-workspace-directory-name }}/log
+          if-no-files-found: ignore

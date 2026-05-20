@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>flexbe_synthesis</name>
+  <version>0.0.1</version>
+  <description>
+      Metapackage for the FlexBE Synthesis stack.
+  </description>
+  <author>Joshua Luzier</author>
+  <maintainer email="robotics@cnu.edu">David Conner</maintainer>
+  <license>Apache-2.0</license>
+  <url type="website">https://github.com/CNURobotics/flexbe_synthesis</url>
+  <url type="bugtracker">https://github.com/CNURobotics/flexbe_synthesis/issues</url>
+  <url type="repository">https://github.com/CNURobotics/flexbe_synthesis</url>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>flexbe_synthesis_core</exec_depend>
+  <exec_depend>flexbe_synthesis_generic</exec_depend>
+  <exec_depend>flexbe_synthesis_msgs</exec_depend>
+  <exec_depend>flexbe_synthesis_slugs</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

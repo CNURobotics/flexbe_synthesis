@@ -1,0 +1,53 @@
+#Defined capabilities of the system
+# variable_mappings:
+#   # These are used to define enumerated types
+#   env_props:
+#       # variables under environment control
+#   sys_props:
+#       # variables under system control
+#           enumerated values (e.g. 1: 'some item')
+#  capability name:
+#     interface : FlexBE state implementation
+#     parameters:
+#         defined parameters for FlexBE State
+#         these can be constants or use the '@variable' to retrieve from synthesis
+#     transition_relation:
+#         optional list of mutually exclusive transitions
+#             These are in addition to standard _activate --> _complete transitions, and are
+#             used to encode required activations or variable assignments
+#             variable assignments due to selections, or required transitions
+#             The key to these are mutually exclusive based on outcome, but multiple values can be set.
+#             Disjunctive choices are shown on one line with |.
+#     preconditions:
+#         optional list of preconditions
+#             capabilities that must be completed prior to activation,
+#             or values of environment or system variables
+#             treated as list of conjunctions of disjunctions, so "a | b" is allowed as entry
+#             variables matching capability names will be converted to memory elements in the specifications
+#             variables matching ENV or SYS (input/outputs) will use those values directly
+#     postconditions:
+#         optional list of post conditions to track based on outcomes
+#             same rules as preconditions
+name: 'coffee_maker'
+
+capabilities:
+    bd:
+        # We will fake detection here
+        # In real system this state implementation would read button state
+        interface: LogState
+        parameters:
+            text: "Button press detected!"
+        autonomy:
+            done: 3  # Full autonomy required
+    gr:
+        interface: LogState
+        parameters:
+            text: "Grinding coffee"
+        preconditions:
+            - bd_c
+    br:
+        interface: LogState
+        parameters:
+            text: "Brewing coffee"
+        preconditions:
+            - gr_c

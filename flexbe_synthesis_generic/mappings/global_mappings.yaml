@@ -1,0 +1,30 @@
+# Mappings used to standardize names
+sm_outcome_mappings:
+    # The potential outcomes of the state machine
+    finished: finished
+    # By default, we will presume desire to recover from failures
+    # So we disallow failed outcome
+    # failed: failed
+state_outcome_mappings:
+    # --- Successes ---
+    done: completed
+    finished: completed
+    received: completed
+    'true': completed
+    ###################
+    # --- Failures  ---
+    aborted: failure
+    canceled: failure
+    data_error: failure
+    empty: failure
+    failed: failure
+    'false': failure
+    no_connection: failure
+    param_error: failure
+    timeout: failure
+    unavailable: failure
+transition_outcomes:
+    # Allowable transitions
+    # These should have unique first characters for tagging (e.g. _f, _c)
+    - completed
+    - failure

@@ -1,0 +1,109 @@
+#Defined capabilities of the system
+# variable_mappings:
+#   # These are used to define enumerated types
+#   env_props:
+#       # variables under environment control
+#   sys_props:
+#       # variables under system control
+#           enumerated values (e.g. 1: 'some item')
+#  capability name:
+#     interface : FlexBE state implementation
+#     parameters:
+#         defined parameters for FlexBE State
+#         these can be constants or use the '@variable' to retrieve from synthesis
+#     transition_relation:
+#         optional list of mutually exclusive transitions
+#             These are in addition to standard _activate --> _complete transitions, and are
+#             used to encode required activations or variable assignments
+#             variable assignments due to selections, or required transitions
+#             The key to these are mutually exclusive based on outcome, but multiple values can be set.
+#             Disjunctive choices are shown on one line with |.
+#     preconditions:
+#         optional list of preconditions
+#             capabilities that must be completed prior to activation,
+#             or values of environment or system variables
+#             treated as list of conjunctions of disjunctions, so "a | b" is allowed as entry
+#             variables matching capability names will be converted to memory elements in the specifications
+#             variables matching ENV or SYS (input/outputs) will use those values directly
+#     postconditions:
+#         optional list of post conditions to track based on outcomes
+#             same rules as preconditions
+name: 'vending_demo'
+variable_mappings:
+    # Use these to map parsed binary values to parameter values
+    # Can go here or custom_mappings
+    sys_props:
+        item :
+            0: 'None'
+            1: 'soda'
+            2: 'beer'
+            3: 'snack'
+
+capabilities:
+    prep_pay:
+        interface: LogState
+        parameters:
+            text: Ready to go
+        preconditions: ['!prep_pay']  # Only if not already activated
+        postconditions: [prep_pay]   # Set memory on completion
+    pay:
+        interface: LogState
+        parameters:
+            text: Insert Coin
+        transition_relation:
+            # If list, presume tied to completed outcome
+            - select  # Immediately transition to select (use list even if singular)
+        preconditions: [prep_pay]  # capability completed
+        postconditions: [pay, '!prep_pay', 'item=0']      # set memory on completion
+    select:
+        interface: LogState
+        parameters:
+            text: Select a Beverage
+        transition_relation:
+            completed:  # Dictionary of outcome keys
+              # Must transition to one of these (disjunction)
+              - soda
+              - beer
+              - snack
+        preconditions: [pay]   # capability completed
+        postconditions:
+            # List output presumed 'completed' outcome
+            - '@item'  # variable assignment required (but not part of formula)
+            - '!pay'  # and clear condition (assume completed)
+            - select
+    soda:
+        interface: LogState
+        parameters:
+            text: Giving soda
+        preconditions:
+            - select
+            - 'item=1'      # numeric values require specific value as condition
+        postconditions:
+            completed:      # specify dictionary of outcomes if needed (otherwise assumes completed)
+                - soda
+                - 'item=0'  # process and clear prior selection
+                - '!select'
+    beer:
+        interface: LogState
+        parameters:
+            text: Giving Beer
+        preconditions:
+            - 'item=2'  # precondition can be capability or variable
+            - 'select'  # Need to force selection button to avoid skipping step by just setting item
+        postconditions:
+            completed: # specify dictionary of outcomes if needed (otherwise assumes completed)
+                - beer     # will treat as a memory item, clearing is not required
+                - 'item=0'  # process and clear prior selection
+                - '!select'
+    snack:
+        interface: LogState
+        parameters:
+            text: Giving Snack
+        preconditions:
+            - select     # If we don't clear item, the better require active selection
+            - 'item=3'   # precondition can be capability or variable
+        postconditions:
+            # Presume this happens on completed if list
+            - 'snack'
+            - 'item=0'  # process and clear prior selection
+            - '!select'

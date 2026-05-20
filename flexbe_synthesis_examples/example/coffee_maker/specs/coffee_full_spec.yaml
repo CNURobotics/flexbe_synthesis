@@ -1,0 +1,48 @@
+# Sample specs from:
+# https://www2.eecs.berkeley.edu/Pubs/TechRpts/2013/EECS-2013-162.pdf
+# https://ruediger-ehlers.de/blog/introtoreactivesynthesis.html
+#
+# Set up for basic activation-outcome paradigm
+spec_name: "coffee_maker"
+specs:
+    INPUT:
+      - "bu"
+      - "bd_c"
+      - "gr_c"
+      - "br_c"
+
+    OUTPUT:
+      - "bd_a"  # Detect button
+      - "br_a"  # Activate brewing
+      - "gr_a"  # Activate grinding
+
+    ENV_INIT:
+      - "!bd_c"
+      - "!gr_c"
+      - "!br_c"
+
+    SYS_INIT:
+      - "bd_a"  # Waiting on button press at start
+      - "! gr_a"
+      - "! br_a"
+
+    SYS_TRANS:
+      - "br_a' <--> gr_c'"  # brew only if grinding completes
+      - "gr_a' <-> bd_c'"   # grind only if button detected
+      - "bd_a' <-> !(gr_a' | br_a')"  # Only start button detector after others deactivated
+      - "bd_a | gr_a | br_a"  # At least one action every step
+      - "!(bd_a & gr_a)"  # Only one action at a time
+      - "!(bd_a & br_a)"  # Only one action at a time
+      - "!(gr_a & bd_a)"  # Only one action at a time
+
+    ENV_TRANS:
+      # - "bu' -> !gr_a & !br_a" # button only if not grinding or brewing, but only relevan when detected
+      - "bd_c' <-> bu' & bd_a"  # Only complete if detecting and button is pressed
+      - "gr_c' <-> gr_a"       # Grinding completes
+      - "br_c' <-> br_a"       # Brewing completes
+
+    # SYS_LIVENESS:
+    #  # Set by goal during test
+
+    ENV_LIVENESS:
+      - 'bu'

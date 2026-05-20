@@ -1,0 +1,132 @@
+# Process pipeline (runs per synthesis request):
+#   spec_loader → capabilities_loader → capability_spec → transition_system_spec
+#   → request_spec → liveness → pending_spec → spec_compiler → synthesizer
+#   → mealy_graph → sm_reducer → mealy_graph(reduced) → sm_generator → sm_layout → count_specs
+
+/types:
+    ReducedAutomaton: Automaton
+
+/pipeline:
+    - entry_point:
+        name: slugs_spec_loader
+        inputs:
+            spec_name: NameStr
+            system_name: NameStr
+            spec_path: FilePathStr  # Optional, otherwise use spec name with system_name
+            # Not using ltl_specs: LTLSpecification for first specs loaded
+        outputs:
+            slugs_specification: Specification
+    - entry_point:
+        name: system_capabilities_loader
+        inputs:
+            system_name: NameStr
+            slugs_specification: Specification
+            verbose: bool       # set true to dump the full capabilities dict on load
+        outputs:
+            system_capabilities: SystemCapabilities
+    - entry_point:
+        name: slugs_capability_specification
+        inputs:
+            spec_name: str
+            system_capabilities: SystemCapabilities
+            slugs_specification: Specification
+        outputs:
+            slugs_specification: Specification
+    - entry_point:
+        name: slugs_transition_system_specification
+        inputs:
+            spec_name: str
+            system_capabilities: SystemCapabilities
+            slugs_specification: Specification
+        outputs:
+            slugs_specification: Specification
+    - entry_point:
+        name: slugs_request_specification
+        inputs:
+            spec_name: str
+            synthesis_request: FlexBESynthesisRequest
+            system_capabilities: SystemCapabilities
+            slugs_specification: Specification
+        outputs:
+            slugs_specification: Specification
+    - entry_point:
+        name: slugs_adversarial_liveness
+        #name: slugs_fair_outcome_liveness
+        inputs:
+            spec_name: str
+            system_capabilities: SystemCapabilities
+            slugs_specification: Specification
+        outputs:
+            slugs_specification: Specification
+    - entry_point:
+        name: slugs_pending_specification
+        inputs:
+            spec_name: str
+            system_capabilities: SystemCapabilities
+            slugs_specification: Specification
+        outputs:
+            slugs_specification: Specification
+    - entry_point:
+        name: slugs_spec_compiler
+        inputs:
+            slugs_specification: Specification
+            specs_output_dir_path: FilePathStr
+        outputs:
+            error_code: SynthesisErrorCode
+    - entry_point:
+        name: slugs_synthesizer
+        inputs:
+            specs_output_dir_path: FilePathStr
+            state_mappings: Mappings
+            synthesis_timeout_s: float
+        outputs:
+            automaton: Automaton
+            error_code: SynthesisErrorCode
+    - entry_point:
+        name: slugs_mealy_graph
+        inputs:
+            automaton: Automaton
+            specs_output_dir_path: FilePathStr
+            spec_name: NameStr
+            mealy_graph_config: dict
+        outputs:
+            error_code: SynthesisErrorCode
+    - entry_point:
+        name: slugs_sm_reducer
+        inputs:
+            automaton: Automaton
+        outputs:
+            reduced_automaton: ReducedAutomaton
+            error_code: SynthesisErrorCode
+    - entry_point:
+        name: slugs_mealy_graph
+        inputs:
+            reduced_automaton: ReducedAutomaton
+            specs_output_dir_path: FilePathStr
+            reduced_automaton_name: NameStr
+            mealy_graph_config: dict
+        outputs:
+            error_code: SynthesisErrorCode
+    - entry_point:
+        name: slugs_sm_generator
+        inputs:
+            reduced_automaton: ReducedAutomaton
+            system_name: NameStr
+        outputs:
+            state_defn: List[StateInstantiation]
+            error_code: SynthesisErrorCode
+    - entry_point:
+        name: sm_layout
+        inputs:
+            state_defn: List[StateInstantiation]
+            specs_output_dir_path: FilePathStr
+            use_fallback_layout: bool
+        outputs:
+            state_defn: List[StateInstantiation]
+            error_code: SynthesisErrorCode
+    - entry_point:
+        name: slugs_count_specs
+        inputs:
+            specs_output_dir_path: FilePathStr
+        outputs:
+            counts_dict: dict
