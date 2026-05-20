@@ -38,7 +38,7 @@ jobs:
 
       - name: Upload colcon logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: colcon-logs-${{ matrix.ros-distro }}
           path: ${{ steps.ros_ci.outputs.ros-workspace-directory-name }}/log
