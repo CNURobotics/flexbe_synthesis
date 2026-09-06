@@ -48,3 +48,6 @@ int16 AUTOMATON_INPUT_VALUATION_INVALID = -40  # The input valuations are invali
 int16 AUTOMATON_OUTPUT_VALUATION_INVALID = -41  # The output valuations are invalid.
 int16 CONFIG_USERDATA_INVALID = -42  # The config userdata is invalid.
 int16 INVALID_SM_GENERATOR = -43  # The SM generator parameter is not a valid entry_point.
+# Strategy audit timed out before all checks ran: result is unverified, not confirmed
+# invalid. Non-fatal -- the pipeline keeps running rather than aborting on this code.
+int16 AUDIT_INCOMPLETE = -44

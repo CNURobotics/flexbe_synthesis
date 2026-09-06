@@ -52,7 +52,12 @@ class BaseProcess(BaseModel, abc.ABC):
         the ``outputs:`` keys declared in the pipeline YAML for this plugin.
         If any returned element is a ``SynthesisErrorCode`` whose value is not
         ``SynthesisErrorCode.SUCCESS``, the pipeline manager halts immediately
-        after storing this plugin's outputs and does not execute subsequent stages.
+        after storing this plugin's outputs and does not execute subsequent
+        stages -- unless the code is one of a small set of non-fatal codes
+        (currently just ``SynthesisErrorCode.AUDIT_INCOMPLETE``), in which
+        case the pipeline continues and the code is instead carried through
+        to the final result so it isn't silently overwritten by a later
+        stage's ``SUCCESS``.
         """
         pass
 

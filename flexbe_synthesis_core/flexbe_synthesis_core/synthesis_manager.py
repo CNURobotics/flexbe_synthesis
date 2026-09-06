@@ -70,6 +70,11 @@ SynthesisYamlDumper.add_representer(
 )
 SynthesisYamlDumper.add_representer(str, SynthesisYamlDumper.represent_str)
 
+# Error codes that report a degraded (not fully verified) result without aborting the
+# pipeline. A stage reporting one of these stays in `self._degraded_error_code` so the
+# final result reflects it instead of being silently overwritten by a later SUCCESS.
+_NON_FATAL_ERROR_CODES = frozenset({SynthesisErrorCode.AUDIT_INCOMPLETE})
+
 
 class FlexBESynthesisActionServer(Node):
     """Own and execute the configured FlexBE synthesis preprocess/process pipelines."""
@@ -249,6 +254,7 @@ class FlexBESynthesisActionServer(Node):
         result.messages = []
         self._result = result
         self._pipeline_messages = []
+        self._degraded_error_code = None
         execute_start = time.time()
 
         try:
@@ -300,7 +306,12 @@ class FlexBESynthesisActionServer(Node):
                 print(f"{10 * '='} States {10 * '='}\n")
                 print(30 * '=' + '\n\n', flush=True)
 
-            result.error_code = SynthesisErrorCode(value=SynthesisErrorCode.SUCCESS)
+            final_code = (
+                self._degraded_error_code
+                if self._degraded_error_code is not None
+                else SynthesisErrorCode.SUCCESS
+            )
+            result.error_code = SynthesisErrorCode(value=final_code)
             result.states = results[0]
             self._publish_feedback(goal, 'complete', 1.0)
             goal.succeed()
@@ -1216,12 +1227,21 @@ class FlexBESynthesisActionServer(Node):
                         self.save_processor_output(proc_id, output_name, received_outputs[index])
 
                     if output_name == 'error_code':
-                        if self.data['error_code'].value != SynthesisErrorCode.SUCCESS:
-                            print(
-                                    '\033[31mFlexBE Synthesis processing error='
-                                    f"{get_error_code_text(self.data['error_code'])}\033[0m"
-                            )
-                            return []
+                        code_value = self.data['error_code'].value
+                        if code_value != SynthesisErrorCode.SUCCESS:
+                            if code_value in _NON_FATAL_ERROR_CODES:
+                                if self._degraded_error_code is None:
+                                    self._degraded_error_code = code_value
+                                print(
+                                        '\033[33mFlexBE Synthesis degraded (non-fatal): '
+                                        f"{get_error_code_text(self.data['error_code'])}\033[0m"
+                                )
+                            else:
+                                print(
+                                        '\033[31mFlexBE Synthesis processing error='
+                                        f"{get_error_code_text(self.data['error_code'])}\033[0m"
+                                )
+                                return []
 
             except (KeyError, TypeError, ValueError, OSError, RuntimeError) as exc:
                 if process_instance is not None:

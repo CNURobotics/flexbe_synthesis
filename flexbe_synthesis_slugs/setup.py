@@ -64,6 +64,7 @@ setup(
             'slugs_count_specs = flexbe_synthesis_slugs.processes.slugs_count_specs:main',
             'slugs_spec_loader = flexbe_synthesis_slugs.processes.slugs_spec_loader:main',
             'slugs_synthesizer = flexbe_synthesis_slugs.processes.slugs_synthesizer:main',
+            'strategy_auditor = flexbe_synthesis_slugs.processes.strategy_auditor:main',
             # Specification generation processes
             (
                 'slugs_capability_specification = '

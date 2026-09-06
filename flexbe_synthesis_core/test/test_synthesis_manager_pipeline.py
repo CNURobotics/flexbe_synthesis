@@ -111,6 +111,25 @@ class _RuntimeErrorProcess(_Process):
         raise RuntimeError('compiler failed')
 
 
+class _ErrorCodeProcess:
+    """Minimal process plugin that reports a configured SynthesisErrorCode output."""
+
+    canceled = []
+    calls = []
+    code_value = SynthesisErrorCode.SUCCESS
+
+    def __init__(self, inputs):
+        self.inputs = inputs
+        self.messages = []
+
+    def process(self):
+        self.calls.append(self.inputs)
+        return [SynthesisErrorCode(value=self.code_value)]
+
+    def cancel(self):
+        self.canceled.append(self.inputs)
+
+
 class _ShortOutputPreprocess:
     """Preprocess plugin returning fewer outputs than the pipeline declares."""
 
@@ -266,6 +285,7 @@ def _manager_stub():
     manager.statistics = {'processes': {}}
     manager._active_process_instance = None
     manager._pipeline_messages = []
+    manager._degraded_error_code = None
     manager.system_name = ''
     manager.capabilities_path = ''
     manager.spec_path = ''
@@ -1183,6 +1203,36 @@ def test_execute_callback_allocates_fresh_result_per_goal():
     assert second.states[0].state_path == '/state_2'
 
 
+def test_execute_callback_surfaces_degraded_code_in_final_result():
+    """A degraded code must survive to the final result, not the SUCCESS stamp."""
+    manager = _manager_stub()
+    manager.statistics = {'processes': {}}
+    manager.data = {'error_code': SynthesisErrorCode(value=SynthesisErrorCode.UNKNOWN)}
+    manager._preprocessed_data = {'error_code': manager.data['error_code']}
+    manager._publish_feedback = lambda goal, status, progress: None
+    manager._check_cancel_requested = lambda goal, stage_name: False
+    manager.load_processes = lambda: None
+    manager.validate = lambda: None
+    manager._update_request_spec_settings = lambda goal: None
+    manager._prepare_output_directory = lambda goal: None
+    manager._save_execution_statistics = lambda: None
+
+    def _execute_processes(goal):
+        del goal
+        manager._degraded_error_code = SynthesisErrorCode.AUDIT_INCOMPLETE
+        manager.statistics['processes']['execution_time'] = 0.0
+        state = StateInstantiation()
+        state.state_path = '/state'
+        return [[state]]
+
+    manager.execute_processes = _execute_processes
+
+    result = FlexBESynthesisActionServer.execute_callback(manager, _ActionGoal())
+
+    assert result.states[0].state_path == '/state'
+    assert result.error_code.value == SynthesisErrorCode.AUDIT_INCOMPLETE
+
+
 def test_validate_rejects_undefined_pipeline_input():
     """Validation should fail before runtime if a configured input is missing."""
     manager = _manager_stub()
@@ -1688,6 +1738,75 @@ def test_execute_processes_reports_runtime_error_as_pipeline_failure():
     assert 'RuntimeError: compiler failed' in manager._pipeline_messages[-1]
     assert 'compiler failed' in manager._logger.errors[-1]
     assert _RuntimeErrorProcess.canceled == [['ready']]
+
+
+def test_execute_processes_continues_past_non_fatal_error_code():
+    """AUDIT_INCOMPLETE should not abort the pipeline like other non-SUCCESS codes."""
+    _ErrorCodeProcess.canceled = []
+    _ErrorCodeProcess.calls = []
+    _ErrorCodeProcess.code_value = SynthesisErrorCode.AUDIT_INCOMPLETE
+    _Process.canceled = []
+    _Process.calls = []
+    manager = _manager_stub()
+    manager.data = {
+        'seed': 'ready',
+        'error_code': SynthesisErrorCode(value=SynthesisErrorCode.UNKNOWN),
+    }
+    manager.processor_plugins = [
+        Plugin('audit', ['seed'], ['error_code']),
+        Plugin('produce', ['seed'], ['result']),
+    ]
+    manager.available_processes = {
+        'audit': _EntryPoint(_ErrorCodeProcess),
+        'produce': _EntryPoint(_Process),
+    }
+    manager.statistics = {
+        'processes': {
+            'pipeline': {
+                'process_0_audit': {'execution_time': None},
+                'process_1_produce': {'execution_time': None},
+            }
+        }
+    }
+    goal = _Goal([False])
+
+    FlexBESynthesisActionServer.execute_processes(manager, goal)
+
+    assert 'result' in manager.data
+    assert _Process.calls == [['ready']]
+    assert manager._degraded_error_code == SynthesisErrorCode.AUDIT_INCOMPLETE
+
+
+def test_execute_processes_aborts_on_fatal_error_code_output():
+    """A genuinely fatal error_code output should still abort the pipeline."""
+    _ErrorCodeProcess.canceled = []
+    _ErrorCodeProcess.calls = []
+    _ErrorCodeProcess.code_value = SynthesisErrorCode.AUTOMATON_INVALID
+    _Process.canceled = []
+    _Process.calls = []
+    manager = _manager_stub()
+    manager.data = {
+        'seed': 'ready',
+        'error_code': SynthesisErrorCode(value=SynthesisErrorCode.UNKNOWN),
+    }
+    manager.processor_plugins = [
+        Plugin('audit', ['seed'], ['error_code']),
+        Plugin('produce', ['seed'], ['result']),
+    ]
+    manager.available_processes = {
+        'audit': _EntryPoint(_ErrorCodeProcess),
+        'produce': _EntryPoint(_Process),
+    }
+    manager.statistics = {
+        'processes': {'pipeline': {'process_0_audit': {'execution_time': None}}}
+    }
+    goal = _Goal([False])
+
+    assert FlexBESynthesisActionServer.execute_processes(manager, goal) == []
+
+    assert 'result' not in manager.data
+    assert _Process.calls == []
+    assert manager._degraded_error_code is None
 
 
 def test_execute_callback_preserves_process_failure_code():

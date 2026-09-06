@@ -106,7 +106,10 @@ class FlexBESynthesisActionClient(Node):
     def get_result_callback(self, future):
         """Handle final synthesis result."""
         result = future.result().result
-        if result.error_code.value == SynthesisErrorCode.SUCCESS:
+        if result.error_code.value in (
+            SynthesisErrorCode.SUCCESS,
+            SynthesisErrorCode.AUDIT_INCOMPLETE,
+        ):
             print(20 * '=', 'Success', 20 * '=')
             print(message_to_yaml(result), flush=True)
             print(30 * '-')
@@ -114,7 +117,10 @@ class FlexBESynthesisActionClient(Node):
                 f'Result received: ec={result.error_code.value} '
                 f'with {len(result.states)} states'
             )
-            self.get_logger().info('Success')
+            if result.error_code.value == SynthesisErrorCode.AUDIT_INCOMPLETE:
+                self.get_logger().info('Success (strategy audit incomplete; unverified)')
+            else:
+                self.get_logger().info('Success')
         else:
             self.get_logger().info('Failed to synthesize state machine')
             self.get_logger().info(
