@@ -44,6 +44,8 @@ import shutil
 import subprocess
 import sys
 
+from flexbe_synthesis_core.graph_utils import tarjan_scc
+
 try:
     from tkinter.filedialog import askopenfilename
 
@@ -66,6 +68,8 @@ class GraphStyle:
     show_node_ids: bool = True  # include node ID in env state xlabel
     sys_choice_edge_color: str = 'green'
     env_choice_edge_color: str = 'red'
+    trap_env_fillcolor: str = '#ffb347'  # goal-unreachable-trap env node fill
+    trap_sys_fillcolor: str = '#b34700'  # goal-unreachable-trap sys node fill
 
 
 def parse_bit(AP):
@@ -125,6 +129,99 @@ def load_automata(file_path):
     with open(file_path) as fin:
         auton = json.load(fin)
     return auton
+
+
+def build_adjacency(auton, initial):
+    """Return (full_adjacency, reachable_node_ids) for the raw Slugs node graph."""
+    nodes = auton['nodes']
+    adjacency = {
+        name: [str(target) for target in state['trans']] for name, state in nodes.items()
+    }
+    seen = set()
+    stack = [initial]
+    while stack:
+        node = stack.pop()
+        if node in seen:
+            continue
+        seen.add(node)
+        stack.extend(n for n in adjacency.get(node, []) if n not in seen)
+    return adjacency, seen
+
+
+def find_traps(auton, goal_var, initial='0'):
+    """
+    Find goal-unreachable-trap SCCs in the reachable strategy graph.
+
+    Mirrors the structural condition ``StrategyAuditor.GOAL_UNREACHABLE_TRAP``
+    checks -- see ``docs/auditor.md``, "Goal-Unreachable Trap Detection" --
+    computed directly on the raw node graph rather than the auditor's product
+    automaton. This is a visualization aid, not a replacement for the
+    auditor: it re-derives trap SCCs from the raw strategy graph and a single
+    boolean goal proposition, without the auditor's activation/outcome
+    protocol monitor, pending-episode failure-bound product construction, or
+    configurable goal-label set.
+
+    Returns ``(sccs, trap_indices, adjacency)``. ``sccs`` is the full list of
+    strongly-connected components (each a list of raw state ids) of the
+    reachable subgraph; ``trap_indices`` indexes into ``sccs`` for components
+    that are cyclic and cannot reach a cyclic goal-containing component.
+
+    Raises ``ValueError`` if ``goal_var`` is not among the automaton's
+    variables; raises ``KeyError`` if ``initial`` is not a reachable node.
+    """
+    nodes = auton['nodes']
+    variables = auton['variables']
+    if goal_var not in variables:
+        raise ValueError(f"Goal variable '{goal_var}' not found in automaton variables.")
+    goal_ix = variables.index(goal_var)
+
+    adjacency, reachable = build_adjacency(auton, initial)
+    # Sorting fixes SCC discovery order (and therefore scc index i)
+    # deterministically across process invocations. `reachable` alone is a
+    # set of strings, whose iteration order depends on hash randomization
+    # (PYTHONHASHSEED), which would otherwise make trap identity unstable
+    # between separate calls on the same strategy.
+    ordered_reachable = sorted(reachable, key=int)
+    reachable_adjacency = {
+        n: [m for m in adjacency[n] if m in reachable] for n in ordered_reachable
+    }
+
+    sccs = tarjan_scc(ordered_reachable, reachable_adjacency)
+    scc_of = {n: i for i, scc in enumerate(sccs) for n in scc}
+
+    def is_cyclic(scc):
+        if len(scc) > 1:
+            return True
+        (only,) = scc
+        return only in reachable_adjacency.get(only, [])
+
+    def is_goal(scc):
+        return any(nodes[n]['state'][goal_ix] == 1 for n in scc)
+
+    cyclic = [i for i, scc in enumerate(sccs) if is_cyclic(scc)]
+    goal_cyclic = {i for i in cyclic if is_goal(sccs[i])}
+
+    condensed_successors = {i: set() for i in range(len(sccs))}
+    for node, succs in reachable_adjacency.items():
+        for target in succs:
+            if scc_of[node] != scc_of[target]:
+                condensed_successors[scc_of[node]].add(scc_of[target])
+    condensed_predecessors = {i: set() for i in range(len(sccs))}
+    for i, succs in condensed_successors.items():
+        for j in succs:
+            condensed_predecessors[j].add(i)
+
+    can_reach_goal = set(goal_cyclic)
+    stack = list(goal_cyclic)
+    while stack:
+        i = stack.pop()
+        for j in condensed_predecessors[i]:
+            if j not in can_reach_goal:
+                can_reach_goal.add(j)
+                stack.append(j)
+
+    trap_indices = [i for i in cyclic if i not in can_reach_goal]
+    return sccs, trap_indices, reachable_adjacency
 
 
 def collect_variables(specs, exact_sections=(), split_prefixes=()):
@@ -313,6 +410,36 @@ def build_arg_parser():
         default='red',
         metavar='COLOR',
         help='Color for environment-choice sys→env edges (default: %(default)s)',
+    )
+
+    # Goal-unreachable-trap highlighting
+    parser.add_argument(
+        '--no-highlight-traps',
+        dest='highlight_traps',
+        action='store_false',
+        help=(
+            'Do not highlight goal-unreachable-trap SCCs (see docs/auditor.md). '
+            'Highlighting is on by default.'
+        ),
+    )
+    parser.add_argument(
+        '--goal-var',
+        default='finished',
+        metavar='NAME',
+        help=(
+            'Boolean output variable marking goal states, used for trap '
+            'highlighting (default: %(default)s). If absent from the '
+            'automaton, highlighting is skipped with a warning.'
+        ),
+    )
+    parser.add_argument(
+        '--initial',
+        default='0',
+        metavar='ID',
+        help=(
+            'Initial raw state id for trap reachability analysis (default: '
+            '%(default)s, matching Slugs convention)'
+        ),
     )
 
     # Output
@@ -613,14 +740,17 @@ class Mealy:
 
         return mealy
 
-    def to_dot(self, layout='dot', splines=True, initial_state=True, style=None):
+    def to_dot(self, layout='dot', splines=True, initial_state=True, style=None, trap_states=None):
         """
         Return a GraphViz dot string for this Mealy machine.
 
         The layout argument selects the GraphViz layout engine. When
         ``initial_state`` is true, a point-shaped Init node is prepended with an
         edge to the recorded initial environment state. The optional style
-        argument controls fonts, colors, and sizes.
+        argument controls fonts, colors, and sizes. ``trap_states``, when
+        given, is a set of raw strategy state ids (as returned by
+        ``find_traps``); the corresponding env/sys node pairs are filled with
+        ``style.trap_env_fillcolor``/``style.trap_sys_fillcolor``.
         """
         if style is None:
             style = GraphStyle()
@@ -652,12 +782,16 @@ class Mealy:
 
         for state_name, state in self.states.items():
             attributes = []
+            is_sys = isinstance(state, SysState)
+            raw_id = state_name[:-len('_sys')] if is_sys else state_name
+            is_trap = trap_states is not None and raw_id in trap_states
 
-            if isinstance(state, SysState):
+            if is_sys:
                 attributes.append(f'width={style.sys_node_size}')
                 attributes.append(f'height={style.sys_node_size}')
                 attributes.append('style=filled')
-                attributes.append('fillcolor=black')
+                fillcolor = f'"{style.trap_sys_fillcolor}"' if is_trap else 'black'
+                attributes.append(f'fillcolor={fillcolor}')
                 attributes.append(f'fontsize={style.font_size}')
                 state_label = state.get_state_label(show_node_id=style.show_node_ids)
                 if state_label:
@@ -670,6 +804,10 @@ class Mealy:
                 state_label = state.get_state_label(show_node_id=style.show_node_ids)
                 if state_label:
                     attributes.append(state_label)
+                if is_trap:
+                    attributes.append('style=filled')
+                    attributes.append(f'fillcolor="{style.trap_env_fillcolor}"')
+                    attributes.append(f'penwidth={style.penwidth * 1.75}')
 
             dot += f'  "{state_name}" [{", ".join(attributes)}];\n'
 
@@ -815,12 +953,35 @@ def main():
         env_choice_edge_color=args.env_choice_edge_color,
     )
 
+    trap_states = None
+    if args.highlight_traps:
+        if args.goal_var not in slugs_auton.get('variables', []):
+            print(
+                f"Warning: goal variable '{args.goal_var}' not found in automaton "
+                'variables; skipping trap highlighting.',
+            )
+        else:
+            try:
+                sccs, trap_indices, _ = find_traps(slugs_auton, args.goal_var, args.initial)
+            except (KeyError, ValueError) as exc:
+                print(f'Warning: trap analysis failed ({exc}); skipping trap highlighting.')
+            else:
+                trap_states = {n for i in trap_indices for n in sccs[i]}
+                if trap_states:
+                    print(
+                        f'Found {len(trap_indices)} goal-unreachable trap SCC(s) '
+                        f'({len(trap_states)} states); highlighting on the graph.',
+                    )
+                else:
+                    print('No goal-unreachable traps found.')
+
     print('Converting to dot format ...')
     dot_str = mealy.to_dot(
         layout=args.layout,
         splines=not args.no_splines,
         initial_state=not args.no_initial_state,
         style=style,
+        trap_states=trap_states,
     )
 
     dot_file = os.path.join(specs_folder, base_name)

@@ -41,10 +41,17 @@ setup(
                 'flexbe_synthesis_slugs.helpers.slugs_automaton_checker:main'
             ),
             'count_slugs_specs = flexbe_synthesis_slugs.helpers.count_specs:main',
+            (
+                'slugs_experiment_postprocess = '
+                'flexbe_synthesis_slugs.helpers.experiment_postprocess:main'
+            ),
             'inspect_slugs_specs = flexbe_synthesis_slugs.helpers.inspect_specs:main',
             'mealy2dot = flexbe_synthesis_slugs.helpers.mealy2dot:main',
+            'slugs_batch_run_harness = flexbe_synthesis_slugs.helpers.batch_run_harness:main',
+            'slugs_coffee_matrix = flexbe_synthesis_slugs.helpers.coffee_matrix:main',
             'slugs_stats_helper = flexbe_synthesis_slugs.helpers.slugs_stats_helper:main',
             'slugs_timing_stats = flexbe_synthesis_slugs.helpers.slugs_timing_stats:main',
+            'trap_excerpt = flexbe_synthesis_slugs.helpers.trap_excerpt:main',
         ],
         'FlexBESynthesis.preprocesses': [
             (

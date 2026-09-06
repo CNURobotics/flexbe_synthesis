@@ -86,6 +86,8 @@ class SlugsRunMetrics:
     # Counts / structure
     ap_i: int | None = None
     ap_o: int | None = None
+    env_init_count: int | None = None
+    sys_init_count: int | None = None
     env_trans_count: int | None = None
     sys_trans_count: int | None = None
     env_liveness_count: int | None = None
@@ -99,6 +101,10 @@ class SlugsRunMetrics:
     cudd_live_nodes: int | None = None
     cudd_peak_nodes: int | None = None
     cudd_var_count: int | None = None
+    cudd_reordering_enabled: bool | None = None
+    cudd_next_reordering: int | None = None
+    cudd_reorderings: int | None = None
+    cudd_reordering_time_s: float | None = None
     winning_region_dag_size: int | None = None
     strategy_bdd_dag_size: int | None = None
 
@@ -152,6 +158,8 @@ _FIELD_PATTERNS: list[tuple[re.Pattern, str, str]] = [
     ),
     (re.compile(r'\bAP_I\b.*?:', re.IGNORECASE), 'ap_i', 'int'),
     (re.compile(r'\bAP_O\b.*?:', re.IGNORECASE), 'ap_o', 'int'),
+    (re.compile(r'\|\s*ENV_INIT\s*\|', re.IGNORECASE), 'env_init_count', 'int'),
+    (re.compile(r'\|\s*SYS_INIT\s*\|', re.IGNORECASE), 'sys_init_count', 'int'),
     (re.compile(r'\|\s*ENV_TRANS\s*\|', re.IGNORECASE), 'env_trans_count', 'int'),
     (re.compile(r'\|\s*SYS_TRANS\s*\|', re.IGNORECASE), 'sys_trans_count', 'int'),
     (re.compile(r'\|\s*ENV_LIVENESS\s*\|', re.IGNORECASE), 'env_liveness_count', 'int'),
@@ -165,6 +173,24 @@ _FIELD_PATTERNS: list[tuple[re.Pattern, str, str]] = [
     (re.compile(r'\bCUDD live node count\b.*?:', re.IGNORECASE), 'cudd_live_nodes', 'int'),
     (re.compile(r'\bCUDD peak node count\b.*?:', re.IGNORECASE), 'cudd_peak_nodes', 'int'),
     (re.compile(r'\bCUDD manager var count\b.*?:', re.IGNORECASE), 'cudd_var_count', 'int'),
+    (
+        re.compile(r'\bCUDD dynamic reordering\b.*?:', re.IGNORECASE),
+        'cudd_reordering_enabled',
+        'bool_word',
+    ),
+    (
+        re.compile(r'\b(CUDD next reordering|Cudd_ReadNextReordering)\b.*?:', re.IGNORECASE),
+        'cudd_next_reordering',
+        'int',
+    ),
+    (re.compile(r'\bCUDD reorderings\b.*?:', re.IGNORECASE), 'cudd_reorderings', 'int'),
+    (
+        # CUDD reports this stat in milliseconds despite the field's `_s`
+        # name; convert here so the parsed value matches its label.
+        re.compile(r'\bCUDD reordering time\b.*?:', re.IGNORECASE),
+        'cudd_reordering_time_s',
+        'ms_to_s',
+    ),
     (re.compile(r'\bMemory in use\b.*?:', re.IGNORECASE), 'cudd_memory_in_use_bytes', 'bytes'),
     (
         re.compile(r'\bCUDD memory in use\b.*?:', re.IGNORECASE),
@@ -202,6 +228,13 @@ def parse_slugs_log(path: Path) -> SlugsRunMetrics:
             if kind == 'bool_false':
                 setattr(m, field, False)
                 break
+            if kind == 'bool_word':
+                value = line_stripped.rsplit(':', 1)[-1].strip().lower()
+                if value in ('enabled', 'on', 'true'):
+                    setattr(m, field, True)
+                elif value in ('disabled', 'off', 'false'):
+                    setattr(m, field, False)
+                break
             if kind == 'int':
                 val = _find_int(line_stripped)
                 if val is not None:
@@ -211,6 +244,11 @@ def parse_slugs_log(path: Path) -> SlugsRunMetrics:
                 val = _find_float(line_stripped)
                 if val is not None:
                     setattr(m, field, val)
+                break
+            if kind == 'ms_to_s':
+                val = _find_float(line_stripped)
+                if val is not None:
+                    setattr(m, field, val / 1000.0)
                 break
             if kind == 'bytes':
                 val = _find_bytes(line_stripped)
