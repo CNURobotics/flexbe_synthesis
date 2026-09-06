@@ -33,6 +33,7 @@ import subprocess
 import time
 from typing import Any
 
+from ament_index_python.packages import get_package_share_directory
 from flexbe_synthesis_core import predefined_strings as fpths
 from flexbe_synthesis_generic.preprocesses.capability_loader import (
     main as capability_loader_main,
@@ -461,9 +462,35 @@ def load_yaml(path: Path) -> dict[str, Any]:
 
 
 def default_state_mappings_path() -> Path:
-    """Return the repo-local global mappings path."""
-    repo_root = Path(__file__).resolve().parents[3]
-    return repo_root / 'flexbe_synthesis_generic' / 'mappings' / 'global_mappings.yaml'
+    """Return the installed global mappings path."""
+    package_share = Path(get_package_share_directory('flexbe_synthesis_generic'))
+    return package_share / 'mappings' / 'global_mappings.yaml'
+
+
+def resolve_state_mappings_path(path: Path | str) -> Path:
+    """Resolve state mappings from cwd, workspace source, or package share."""
+    if isinstance(path, str) and not path:
+        raise FileNotFoundError(
+            'State mappings path is empty; pass --state-mappings or set the '
+            'environment variable used by that argument.'
+        )
+    expanded = Path(path).expanduser()
+    candidates = [expanded]
+    if not expanded.is_absolute():
+        candidates.append(Path.cwd() / 'src' / 'flexbe_synthesis' / expanded)
+    if len(expanded.parts) >= 3 and expanded.parts[-3:-1] == (
+        'flexbe_synthesis_generic',
+        'mappings',
+    ):
+        package_share = Path(get_package_share_directory('flexbe_synthesis_generic'))
+        candidates.append(package_share / 'mappings' / expanded.name)
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+
+    tried = ', '.join(str(candidate) for candidate in candidates)
+    raise FileNotFoundError(f"State mappings file '{path}' not found; tried {tried}.")
 
 
 def git_sha(path: Path) -> str:
@@ -1561,7 +1588,8 @@ def run_matrix(args):
     matrix_rows = filter_matrix_rows(matrix_rows, getattr(args, 'skip_long', False))
     out_dir = Path(args.out_dir).expanduser()
     validate_output_paths(out_dir, args.append)
-    state_mappings = load_yaml(Path(args.state_mappings).expanduser())
+    state_mappings_path = resolve_state_mappings_path(args.state_mappings)
+    state_mappings = load_yaml(state_mappings_path)
     synthesis_home = args.synthesis_home or os.getenv(fpths._SYNTHESIS_HOME_ENV)
     system_cache = {}
 

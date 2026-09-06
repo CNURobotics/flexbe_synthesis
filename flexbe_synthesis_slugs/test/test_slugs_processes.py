@@ -19,6 +19,7 @@ import csv
 from io import StringIO
 import json
 import os
+from pathlib import Path
 import subprocess
 import threading
 from types import SimpleNamespace
@@ -390,6 +391,40 @@ done
 
     assert counts['structuredslugs'] == {'INPUT': 1, 'OUTPUT': 1}
     assert (byproducts_dir / 'CoffeeSM.counts').exists()
+
+
+def test_batch_harness_resolves_workspace_root_state_mappings(tmp_path, monkeypatch):
+    """Resolve documented state-mapping paths from the workspace root."""
+    workspace = tmp_path / 'workspace'
+    mapping_path = (
+        workspace
+        / 'src'
+        / 'flexbe_synthesis'
+        / 'flexbe_synthesis_generic'
+        / 'mappings'
+        / 'infinite_mappings.yaml'
+    )
+    mapping_path.parent.mkdir(parents=True)
+    mapping_path.write_text('sm_outcome_mappings: {}\n', encoding='utf-8')
+    monkeypatch.chdir(workspace)
+
+    resolved = batch_run_harness.resolve_state_mappings_path(
+        Path('flexbe_synthesis_generic/mappings/infinite_mappings.yaml')
+    )
+
+    assert resolved == mapping_path
+
+
+def test_batch_harness_rejects_empty_state_mappings_path():
+    """Empty --state-mappings values should not resolve to cwd."""
+    with pytest.raises(FileNotFoundError, match='path is empty'):
+        batch_run_harness.resolve_state_mappings_path('')
+
+
+def test_batch_harness_rejects_state_mappings_directory(tmp_path):
+    """State mappings resolution should require a YAML file, not a directory."""
+    with pytest.raises(FileNotFoundError, match='not found'):
+        batch_run_harness.resolve_state_mappings_path(tmp_path)
 
 
 def test_slugs_spec_compiler_does_not_change_cwd(tmp_path, monkeypatch):

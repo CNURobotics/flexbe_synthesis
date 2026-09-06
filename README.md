@@ -89,6 +89,9 @@ Generic preprocessing documentation lives in
 Information about using
 Slugs GR(1)-based synthesis lives in
 [`flexbe_synthesis_slugs/README.md`](flexbe_synthesis_slugs/README.md).
+The Slugs backend also includes a post-synthesis explicit-strategy validator;
+see the
+[Strategy Auditor documentation](flexbe_synthesis_slugs/docs/auditor.md).
 
 ## Examples
 

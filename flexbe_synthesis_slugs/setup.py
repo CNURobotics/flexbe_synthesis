@@ -12,7 +12,22 @@ setup(
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml', 'README.md']),
         ('share/' + package_name, ['THIRD_PARTY_LICENSES.md']),
-        ('share/' + package_name + '/docs', ['docs/state_generation.md']),
+        (
+            'share/' + package_name + '/docs',
+            [
+                'docs/auditor.md',
+                'docs/batch_run_harness.md',
+                'docs/clause_ordering_check.md',
+                'docs/coffee_experiment_runbook.md',
+                'docs/fairness_livelock_detection.md',
+                'docs/multi_run_sampling.md',
+                'docs/ordering_study_figure.md',
+                'docs/state_generation.md',
+                'docs/variable_ordering.md',
+                'docs/variable_ordering_study.md',
+                'docs/well_separation_analyzer.md',
+            ],
+        ),
         ('share/' + package_name + '/scripts', ['scripts/install_slugs.sh']),
         (
             'share/' + package_name + '/licenses/structured_slugs_parser',

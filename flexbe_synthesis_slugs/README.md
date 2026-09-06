@@ -6,6 +6,15 @@ automaton conversion code, and validation utility. Runnable examples and demo
 walkthroughs live in
 [`flexbe_synthesis_examples`](../flexbe_synthesis_examples/README.md).
 
+The post-synthesis `strategy_auditor` plugin validates explicit Slugs
+strategies before and after automaton reduction; see the
+[Strategy Auditor documentation](docs/auditor.md).
+
+The pre-synthesis `slugs_well_separation_analyzer` plugin checks
+specification-level well-separation via Slugs' `--checkWellSeparation`
+analysis mode; see
+[Well-Separation Analyzer documentation](docs/well_separation_analyzer.md).
+
 ## Dependencies
 
 For normal use, build this package in the same ROS 2 workspace as the rest of FlexBE Synthesis:
@@ -30,12 +39,23 @@ Change to the `flexbe_synthesis/flexbe_synthesis_slugs/scripts` folder and run:
 
 This only needs to be done once per computer.
 
+To update an existing installation from the latest `flexbe-synthesis` branch,
+force a source pull and clean rebuild:
+
+```bash
+./install_slugs.sh --force
+```
+
+The short form `-f` is equivalent. If a `slugs` checkout already exists beside
+the script, the update uses a fast-forward-only pull and stops rather than
+overwriting local changes or divergent commits.
+
 ### Why a custom fork
 
 The upstream Slugs repository (`https://github.com/VerifiableRobotics/slugs`) targets
 Python 2 and does not produce all of the output this package requires. The
 CNURobotics fork (`https://github.com/CNURobotics/slugs.git`,
-branch `flexbe-synthesis`) differs in three important ways:
+branch `flexbe-synthesis`) differs in four important ways:
 
 1. **Python 3 compatibility.** The upstream structured-slugs parser scripts
    (`compiler.py`, `integerVariableSubstitutor.py`) use Python 2 syntax. The
@@ -58,9 +78,12 @@ branch `flexbe-synthesis`) differs in three important ways:
    [fork changelog](https://github.com/CNURobotics/slugs/blob/flexbe-synthesis/CHANGELOG.md)
    for the full list.
 
-The tested baseline is commit `844e680`. The `flexbe-synthesis` branch is
-expected to remain compatible with this baseline as it receives updates, but
-pinning a deployment to that commit is recommended for reproducible builds.
+4. **Well-separation analysis.** The branch provides
+   `--checkWellSeparation` and optional `--minimizeWellSeparationCore` support
+   used by the pre-synthesis `slugs_well_separation_analyzer` pipeline stage.
+
+For reproducible deployments, pin the `flexbe-synthesis` branch to a known
+commit or release after selecting the Slugs feature set you need.
 
 The installer requires `git`, `make`, a compiler toolchain, and write access to
 the selected install directory. Linux is the primary supported platform. The
@@ -243,6 +266,12 @@ to satisfy SM generation. Model real first actions as ordinary capabilities;
 `begin_game` exists only to bootstrap the GR(1) game.
 
 ## Parsed Capability Encoding
+
+The paper refers to this representation as the **enumerated encoding**. In
+this codebase, older names such as `parsed`, `parsed-binary`, and
+`ParsedCapabilityEncoding` refer to the same encoding family: capability
+activation is represented by an integer-valued action variable rather than a
+one-hot set of `<cap>_a` propositions.
 
 When `SlugsActivationSpecificationParsed` is in the pipeline it replaces
 individual `<cap>_a` activation propositions with a single integer variable
