@@ -22,18 +22,16 @@ from flexbe_synthesis_core.base_process import BaseProcess
 from flexbe_synthesis_msgs.msg import SynthesisErrorCode
 from flexbe_synthesis_slugs.helpers.sm_gen.sm_gen_util import new_si
 from flexbe_synthesis_slugs.helpers.sm_generation_helpers import SMGenerationHelpers
+from pydantic import ConfigDict
 
 
 class SM_Generator(BaseProcess):
     """Pipeline process wrapper around `SMGenerationHelpers`."""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     synthesized_automaton: dict
     system_capabilities_name: str
-
-    class Config:
-        """Pydantic configuration."""
-
-        arbitrary_types_allowed = True
 
     def process(self):
         """Build state instantiations and append explicit outcome pseudo-states."""

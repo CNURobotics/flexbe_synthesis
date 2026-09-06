@@ -23,6 +23,7 @@ from flexbe_msgs.msg import StateInstantiation
 from flexbe_synthesis_core.base_process import BaseProcess
 from flexbe_synthesis_core.graph_utils import tarjan_scc
 from flexbe_synthesis_msgs.msg import SynthesisErrorCode
+from pydantic import ConfigDict
 
 try:
     import pygraphviz as pgv
@@ -250,14 +251,11 @@ def _write_fallback_dot(states, graph_path):
 class SM_Layout(BaseProcess):
     """Compute state layout using Graphviz and embed positions in states."""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     synthesized_state_machine: list[StateInstantiation]
     specs_output_dir_path: str
     use_fallback_layout: bool = False
-
-    class Config:
-        """Allow pydantic to accept ROS message types."""
-
-        arbitrary_types_allowed = True
 
     def process(self):
         """Return positioned states and synthesis success code."""

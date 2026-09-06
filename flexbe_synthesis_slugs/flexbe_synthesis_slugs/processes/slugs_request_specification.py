@@ -31,12 +31,15 @@ from flexbe_synthesis_slugs.helpers.gr1_formula import (
 )
 from flexbe_synthesis_slugs.helpers.gr1_specification import GR1Specification
 import flexbe_synthesis_slugs.helpers.ltl as LTL
+from pydantic import ConfigDict
 
 logger = logging.getLogger(__name__)
 
 
 class SlugsRequestSpecification(BaseProcess):
     """Create GR(1) formulas from an incoming synthesis request."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     BASIC_VARIABLE_PATTERN: ClassVar = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*'?|\d+)$")
     SAFE_REQUEST_FORMULA_PATTERN: ClassVar = re.compile(r"^[A-Za-z0-9_'\s!&|()<>=-]+$")
@@ -52,11 +55,6 @@ class SlugsRequestSpecification(BaseProcess):
     synthesis_request: FlexBESynthesisRequest
     system_capabilities: dict
     current_specification: dict = {}
-
-    class Config:
-        """Allow pydantic model fields with ROS message types."""
-
-        arbitrary_types_allowed = True
 
     def process(self):
         """Validate request goals/ICs and fold them into the current specification."""
