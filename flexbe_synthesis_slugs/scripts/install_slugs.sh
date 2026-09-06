@@ -15,6 +15,30 @@ INSTALL=${SLUGS_INSTALL_DIR:-/usr/local/bin}
 SLUGS_REPO=https://github.com/CNURobotics/slugs.git
 SLUGS_BRANCH=flexbe-synthesis
 TESTED_SLUGS_COMMIT=844e680
+FORCE=0
+
+usage() {
+	echo "Usage: $0 [--force|-f]"
+	echo "  -f, --force  Pull the latest Slugs source and rebuild even if it is installed."
+}
+
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+		-f|--force)
+			FORCE=1
+			;;
+		-h|--help)
+			usage
+			exit 0
+			;;
+		*)
+			echo "  ERROR: unknown option '$1'."
+			usage
+			exit 2
+			;;
+	esac
+	shift
+done
 
 if ! command -v git >/dev/null 2>&1; then
 	echo "  ERROR: git is required to clone ${SLUGS_REPO}."
@@ -26,15 +50,18 @@ if ! command -v make >/dev/null 2>&1; then
 	exit 1
 fi
 
-if [ -x "${INSTALL}/slugs" ]; then
+if [ "${FORCE}" -eq 0 ] && [ -x "${INSTALL}/slugs" ]; then
 	echo "slugs is already installed in ${INSTALL}"
 	exit 0
-elif command -v slugs >/dev/null 2>&1; then
+elif [ "${FORCE}" -eq 0 ] && command -v slugs >/dev/null 2>&1; then
 	echo "  slugs is already available in the path"
 	echo $PATH
 	exit 0
 fi
 
+if [ "${FORCE}" -eq 1 ]; then
+	echo "Forcing Slugs source update and rebuild ..."
+fi
 echo "Need to install slugs in '${INSTALL}' ..."
 echo "  Using ${SLUGS_REPO} (${SLUGS_BRANCH}); tested baseline ${TESTED_SLUGS_COMMIT}"
 
@@ -55,12 +82,34 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 	if [ -n "${CURRENT_BRANCH}" ] && [ "${CURRENT_BRANCH}" != "${SLUGS_BRANCH}" ]; then
 		echo "  WARNING: existing slugs checkout is on '${CURRENT_BRANCH}', expected '${SLUGS_BRANCH}'."
 	fi
+	if [ "${FORCE}" -eq 1 ]; then
+		echo "  Pulling latest ${SLUGS_BRANCH} source ..."
+		if ! git checkout "${SLUGS_BRANCH}"; then
+			echo "  ERROR: failed to switch the existing Slugs checkout to '${SLUGS_BRANCH}'."
+			echo "  Resolve any local changes, then rerun this script."
+			exit 1
+		fi
+		if ! git pull --ff-only origin "${SLUGS_BRANCH}"; then
+			echo "  ERROR: failed to fast-forward the existing Slugs checkout."
+			echo "  Resolve any local changes or branch divergence, then rerun this script."
+			exit 1
+		fi
+	fi
+elif [ "${FORCE}" -eq 1 ]; then
+	echo "  ERROR: cannot update 'slugs' because it is not a Git checkout."
+	exit 1
 fi
 
 # build slugs
 echo "  Building the slugs library ..."
 cd src/
-if ! [ -e "slugs" ] ; then
+if [ "${FORCE}" -eq 1 ]; then
+	if ! make clean; then
+		echo "  ERROR: failed to clean the existing Slugs build."
+		exit 1
+	fi
+fi
+if [ "${FORCE}" -eq 1 ] || ! [ -e "slugs" ] ; then
 	if ! make; then
 		echo "  ERROR: failed to build Slugs."
 		echo "  Install a compiler toolchain and required build dependencies, then rerun this script."
