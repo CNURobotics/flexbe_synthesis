@@ -551,7 +551,8 @@ class SMGenConfig:
             raise SMGenError(SynthesisErrorCode.CONFIG_AUTONOMY_INVALID)
 
     def _resolve_condition_autonomy(self, out_var, outcomes):
-        """Resolve one transition condition's autonomy to a scalar.
+        """
+        Resolve one transition condition's autonomy to a scalar.
 
         ``conditions`` here is keyed by substate/capability name (e.g. 'gr'),
         so ``self.config[out_var]['autonomy']`` is the value

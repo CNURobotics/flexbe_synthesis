@@ -227,7 +227,8 @@ def _format_stdev_number(
     scale: float = 1.0,
     places: int = 1,
 ) -> str:
-    r"""Format a "$\pm$ stdev" companion-row value.
+    r"""
+    Format a "$\pm$ stdev" companion-row value.
 
     Blank when the cell's mean came from a single trial (`n <= 1`, e.g. a
     fixed ordering with no repeats) or when every contributing trial gave the
@@ -244,7 +245,8 @@ def _format_stdev_number(
 
 
 def _well_separated_label(status: str) -> str:
-    """Return the paper's Yes/No label for a group's well_separation_status.
+    """
+    Return the paper's Yes/No label for a group's well_separation_status.
 
     'Mixed' (disagreement across a group's orderings) passes through
     unchanged rather than collapsing to Yes/No: it isn't a completed
@@ -735,7 +737,8 @@ def _compare_summary_mean_rows(
 
 
 def _paper_rows(time_unit: str, compact: bool = False) -> list[tuple[str, str, str]]:
-    """Return paper-table rows with timing labels specialized to the unit.
+    """
+    Return paper-table rows with timing labels specialized to the unit.
 
     `compact` restricts to COMPACT_METRICS (the Discussion-section summary-table
     row subset) instead of every PAPER_TABLE_ROW_SPECS row.
@@ -745,6 +748,7 @@ def _paper_rows(time_unit: str, compact: bool = False) -> list[tuple[str, str, s
         for label, metric, kind in PAPER_TABLE_ROW_SPECS
         if not compact or metric in COMPACT_METRICS
     ]
+
 
 # A column_indicator like '2FP' or '1S' -> (digit, liveness letter, pending flag).
 # Bare labels that don't match (e.g. a hand-written baseline's 'Full', 'MoveOnly',
@@ -760,7 +764,8 @@ _BASELINE_ORDER_OVERRIDE = {'MoveOnly': 0, 'Full': 1}
 
 
 def _indicator_sort_key(indicator: str):
-    """Return a sort key for ordering paper-table columns.
+    """
+    Return a sort key for ordering paper-table columns.
 
     Reproduces the column order every case-study table actually uses:
     non-scenario labels (baselines) first -- in `_BASELINE_ORDER_OVERRIDE`
@@ -860,7 +865,8 @@ def write_paper_table(
     time_unit: str = 'ms',
     compact: bool = False,
 ) -> Path:
-    """Write a paper-style results table from a summary CSV.
+    """
+    Write a paper-style results table from a summary CSV.
 
     Rows are the reported metrics (Realizable, AP/formula counts, BDD nodes,
     SM sizes, and pipeline timing in ``time_unit``). Pass ``compact=True`` to
@@ -1880,7 +1886,7 @@ def main():
              '(Well Separated, Realizable, FlexBE HFSM Realized, |AP_I|, '
              '|AP_O|, |Slugs SM|, |Reduced|, Realizability, Realize HFSM, '
              'Overall) instead of every PAPER_TABLE_ROW_SPECS row -- the '
-             'condensed table convention used by every domain\'s '
+             'condensed table convention used by each domain-specific '
              '*_summary.tex in the paper (full detail stays in the '
              'Appendix-facing default).',
     )

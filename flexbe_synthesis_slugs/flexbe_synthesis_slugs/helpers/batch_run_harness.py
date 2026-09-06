@@ -957,7 +957,8 @@ def flatten_well_separation(well_separation: dict[str, Any]) -> dict[str, Any]:
 
 
 def _extracted_sm_size(automaton, realizable):
-    """Return an extracted automaton's state count, or None if none exists.
+    """
+    Return an extracted automaton's state count, or None if none exists.
 
     `automaton` may be a dict shell (e.g. `{}` or `{'automaton': []}`) even
     when no strategy exists at all: the synthesizer process returns this same
@@ -1231,7 +1232,8 @@ def read_variable_order(path: Path) -> dict[str, Any]:
 
 
 def count_init_clauses(structuredslugs_path: Path) -> dict[str, int | None]:
-    """Count [ENV_INIT] / [SYS_INIT] clauses in a compiled .structuredslugs file.
+    """
+    Count [ENV_INIT] / [SYS_INIT] clauses in a compiled .structuredslugs file.
 
     Slugs reports TRANS/LIVENESS counts in its stats output but not INIT, so the
     init-formula counts (paper's |phi_i^a| / |phi_i^g|) are taken here from the

@@ -59,7 +59,8 @@ def context_predecessors(adjacency, trap_states, hops):
 
 
 def _stub_node(name, style):
-    """Return a dot declaration for a truncated 'elsewhere' stub node.
+    """
+    Return a dot declaration for a truncated 'elsewhere' stub node.
 
     Drawn as a bold ellipsis rather than a filled dot or a specific state
     id, so it reads as a cut/break in the graph rather than a real,

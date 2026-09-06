@@ -42,7 +42,8 @@ def coffee_root() -> Path:
 
 
 def _reordering_treatments():
-    """Return Coffee CUDD reordering policies.
+    """
+    Return Coffee CUDD reordering policies.
 
     The `auto` policy (Slugs default sifting) was dropped: prior-run data showed
     it is effectively identical to `off` at these BDD sizes (default sifting
@@ -96,7 +97,8 @@ def ordering_rows(full=False, random_seeds=40):
 
 
 def _full_spec_row(root, ordering, n_trials):
-    """Build one hand-written full-spec baseline row (paper Table I column 1).
+    """
+    Build one hand-written full-spec baseline row (paper Table I column 1).
 
     The loaded spec is already complete, so `full_spec: True` tells the harness
     to skip the capability/liveness/pending generation and only bind the request

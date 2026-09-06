@@ -767,7 +767,8 @@ class StrategyAuditor:
         return None
 
     def _advance_counters(self, counters, pending_name, observed, config, next_pending):
-        """Update consecutive failure counters after an observed attempt outcome.
+        """
+        Update consecutive failure counters after an observed attempt outcome.
 
         A capability's counter tracks failures only within its current unbroken
         streak of immediately-repeated activation. It resets to 0 whenever that
@@ -816,7 +817,8 @@ class StrategyAuditor:
         return None
 
     def _is_goal_state(self, state, config):
-        """Return True when state output or input asserts a configured goal outcome.
+        """
+        Return True when state output or input asserts a configured goal outcome.
 
         Goal outcomes are usually system-asserted SM outcomes (e.g. `finished`), but
         some examples (e.g. coffee, which has no sm_outcome_mappings and is designed
@@ -832,7 +834,8 @@ class StrategyAuditor:
         return False
 
     def _is_goal_observation(self, pending_name, observed, config):
-        """Return True when a generic observed outcome satisfies a concrete goal.
+        """
+        Return True when a generic observed outcome satisfies a concrete goal.
 
         Parsed/enumerated encodings intentionally replace per-capability input labels
         such as `br_c` with generic outcome labels such as `completed`.  While brew is

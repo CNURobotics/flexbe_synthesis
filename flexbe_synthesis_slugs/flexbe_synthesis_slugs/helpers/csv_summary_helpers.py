@@ -15,7 +15,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Shared CSV-row summary helpers.
+"""
+Shared CSV-row summary helpers.
 
 Used by both batch_run_harness.py (writing master/summary CSVs) and
 experiment_postprocess.py (reading them back into paper tables and plots),
@@ -34,7 +35,8 @@ def bool_text(value: Any) -> str:
 
 
 def realizable_summary(group_rows: list[dict[str, str]]) -> str:
-    """Return 'Yes'/'No'/'Mixed' for a group's realizable values, '' if none reported.
+    """
+    Return 'Yes'/'No'/'Mixed' for a group's realizable values, '' if none reported.
 
     Realizability is a property of the compiled spec, not the variable ordering, so a
     well-formed group (same capability file/encoding/liveness/pending) should always

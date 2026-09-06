@@ -1473,7 +1473,8 @@ def test_flatten_well_separation_result_reports_core_fields():
 
 
 def test_extracted_sm_size_requires_realizable():
-    """An automaton dict alone can't tell 'no strategy' from 'a real one'.
+    """
+    An automaton dict alone can't tell 'no strategy' from 'a real one'.
 
     `compile_and_synthesize` returns a dict-shaped `automaton` (e.g. `{}` or
     `{'automaton': []}`) even on an unrealizable/fatal outcome, so

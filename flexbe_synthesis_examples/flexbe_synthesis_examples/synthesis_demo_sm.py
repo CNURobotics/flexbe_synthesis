@@ -34,11 +34,8 @@ Created on Tue May 19 2026
 
 from flexbe_core import Autonomy
 from flexbe_core import Behavior
-from flexbe_core import ConcurrencyContainer
-from flexbe_core import Logger
-from flexbe_core import OperatableStateMachine
-from flexbe_core import PriorityContainer
 from flexbe_core import initialize_flexbe_core
+from flexbe_core import OperatableStateMachine
 from flexbe_states.log_state import LogState
 
 # Additional imports can be added inside the following tags
@@ -69,7 +66,6 @@ class synthesis_demoSM(Behavior):
         # Additional initialization code can be added inside the following tags
         # [MANUAL_INIT]
 
-
         # [/MANUAL_INIT]
 
         # Behavior comments:
@@ -83,7 +79,6 @@ class synthesis_demoSM(Behavior):
         # Additional creation code can be added inside the following tags
         # [MANUAL_CREATE]
 
-
         # [/MANUAL_CREATE]
 
         # finished:x:1275 y:80
@@ -92,7 +87,7 @@ class synthesis_demoSM(Behavior):
         with _sm_synthesis_0:
             # x:144 y:74
             OperatableStateMachine.add('Temp',
-                                       LogState(text="Temporary state to be replaced by synthesis",
+                                       LogState(text='Temporary state to be replaced by synthesis',
                                                 severity=2),
                                        transitions={'done': 'finished'},
                                        autonomy={'done': Autonomy.Off})
@@ -108,6 +103,5 @@ class synthesis_demoSM(Behavior):
 
     # Private functions can be added inside the following tags
     # [MANUAL_FUNC]
-
 
     # [/MANUAL_FUNC]

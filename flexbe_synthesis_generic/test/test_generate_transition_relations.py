@@ -245,5 +245,5 @@ def test_main_uses_behaviors_used_field_name():
     )
 
     assert isinstance(generator, GenerateTransitionRelations)
-    assert generator.behaviors_used is behaviors_used
+    assert generator.behaviors_used == behaviors_used
     assert not hasattr(generator, 'behavior_implementations_used')

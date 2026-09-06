@@ -485,7 +485,8 @@ def test_response_autonomy_list_uses_mapped_response_values():
 
 
 def test_get_autonomy_list_resolves_mapped_dict_autonomy_from_substate_name():
-    """get_autonomy_list resolves mapped autonomy given the real caller's input shape.
+    """
+    get_autonomy_list resolves mapped autonomy given the real caller's input shape.
 
     sm_generation_helpers.py's actual call site builds its ``conditions``
     dict keyed by *substate/capability name* (e.g. 'approval_a', from

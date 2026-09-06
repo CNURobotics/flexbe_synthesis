@@ -300,7 +300,8 @@ def test_strategy_auditor_allows_cycle_that_can_reach_goal(tmp_path):
 
 
 def test_strategy_auditor_rejects_cycle_that_only_visits_goal_once(tmp_path):
-    """A single non-recurring visit to the goal does not clear a cyclic SCC.
+    """
+    A single non-recurring visit to the goal does not clear a cyclic SCC.
 
     S1 can reach the goal state S2, but S2 is visited at most once (it is not
     itself cyclic and has no path back to S1) before the execution is forced
@@ -330,7 +331,8 @@ def test_strategy_auditor_rejects_cycle_that_only_visits_goal_once(tmp_path):
 
 
 def test_strategy_auditor_allows_cycle_that_can_reach_input_side_goal(tmp_path):
-    """goal_outcomes may name an environment input, not just a system output.
+    """
+    goal_outcomes may name an environment input, not just a system output.
 
     Some examples (e.g. coffee) have no sm_outcome_mappings and are designed to
     cycle forever; their only observable progress signal is an environment-reported
@@ -410,7 +412,8 @@ def test_strategy_auditor_allows_bounded_failure_at_limit(tmp_path):
 
 
 def test_strategy_auditor_resets_failure_streak_on_interrupting_capability(tmp_path):
-    """Failures separated by an unrelated capability's episode are not consecutive.
+    """
+    Failures separated by an unrelated capability's episode are not consecutive.
 
     `step` fails, then `other` is activated and succeeds, then `step` is
     activated again and fails a second time. With max_consecutive_failures=1,
@@ -713,7 +716,8 @@ def test_strategy_auditor_rejects_missing_outcome_for_parsed_activation(tmp_path
 
 
 def test_strategy_auditor_allows_generic_outcome_before_first_activation_parsed(tmp_path):
-    """A generic parsed outcome observed while leaving the null start state is inert.
+    """
+    A generic parsed outcome observed while leaving the null start state is inert.
 
     Parsed/enumerated specs only constrain the generic outcome props relative
     to the *current* real capability (`(capability=i) -> completed'` for
