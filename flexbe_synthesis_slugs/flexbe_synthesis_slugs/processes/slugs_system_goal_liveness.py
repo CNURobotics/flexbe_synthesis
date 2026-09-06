@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Add system-side (adversarial) liveness constraints for capability outcomes."""
+"""Add System-Goal Liveness constraints for capability outcomes."""
 
 import logging
 
@@ -25,7 +25,7 @@ import flexbe_synthesis_slugs.helpers.ltl as LTL
 logger = logging.getLogger(__name__)
 
 
-class SlugsAdversarialLiveness(BaseProcess):
+class SlugsSystemGoalLiveness(BaseProcess):
     """Generate `sys_liveness` constraints for capability completion progress."""
 
     spec_name: str
@@ -33,7 +33,7 @@ class SlugsAdversarialLiveness(BaseProcess):
     current_specification: dict = {}
 
     def process(self):
-        """Append adversarial liveness: outcomes or progress obligations."""
+        """Append System-Goal Liveness: outcomes or progress obligations."""
         logger.info('Starting %s ...', self.name)
 
         capabilities = self.system_capabilities.get('capabilities', {})
@@ -93,7 +93,7 @@ class SlugsAdversarialLiveness(BaseProcess):
                 # upstream plugin that may add a sys_liveness entry.
                 if len(gr1_spec.sys_liveness) != 1:
                     raise ValueError(
-                        f'SlugsAdversarialLiveness requires exactly one prior sys_liveness '
+                        f'SlugsSystemGoalLiveness requires exactly one prior sys_liveness '
                         f'goal (set by slugs_request_specification), but found '
                         f'{len(gr1_spec.sys_liveness)}. Check the process pipeline '
                         f'ordering — no other plugin should add sys_liveness before this one.'
@@ -110,13 +110,13 @@ class SlugsAdversarialLiveness(BaseProcess):
 
 
 def main(inputs):
-    """Create adversarial liveness process instance."""
+    """Create System-Goal Liveness process instance."""
     current_spec = {}
     if len(inputs) > 2:
         current_spec = inputs[2]
 
-    return SlugsAdversarialLiveness(
-        name='SlugsAdversarialLiveness',
+    return SlugsSystemGoalLiveness(
+        name='SlugsSystemGoalLiveness',
         spec_name=inputs[0],
         system_capabilities=inputs[1],
         current_specification=current_spec,

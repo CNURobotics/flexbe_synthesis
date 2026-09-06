@@ -61,6 +61,10 @@ setup(
             'slugs_sm_generator = flexbe_synthesis_slugs.processes.slugs_sm_generator:main',
             'slugs_sm_reducer = flexbe_synthesis_slugs.processes.slugs_sm_reducer:main',
             'slugs_spec_compiler = flexbe_synthesis_slugs.processes.slugs_spec_compiler:main',
+            (
+                'slugs_well_separation_analyzer = '
+                'flexbe_synthesis_slugs.processes.slugs_well_separation_analyzer:main'
+            ),
             'slugs_count_specs = flexbe_synthesis_slugs.processes.slugs_count_specs:main',
             'slugs_spec_loader = flexbe_synthesis_slugs.processes.slugs_spec_loader:main',
             'slugs_synthesizer = flexbe_synthesis_slugs.processes.slugs_synthesizer:main',
@@ -83,8 +87,8 @@ setup(
                 'flexbe_synthesis_slugs.processes.slugs_pending_specification:main'
             ),
             (
-                'slugs_adversarial_liveness = '
-                'flexbe_synthesis_slugs.processes.slugs_adversarial_liveness:main'
+                'slugs_system_goal_liveness = '
+                'flexbe_synthesis_slugs.processes.slugs_system_goal_liveness:main'
             ),
             (
                 'slugs_fair_outcome_liveness = '
