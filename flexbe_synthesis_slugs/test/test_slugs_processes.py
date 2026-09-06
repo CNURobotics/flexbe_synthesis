@@ -15,12 +15,18 @@
 
 """Lightweight tests for Slugs processes that do not require the Slugs binary."""
 
+import csv
+from io import StringIO
+import json
 import os
 import subprocess
 import threading
+from types import SimpleNamespace
 
 from flexbe_synthesis_msgs.msg import FlexBESynthesisRequest, SynthesisErrorCode
 from flexbe_synthesis_slugs.helpers import (
+    batch_run_harness,
+    experiment_postprocess,
     slugs_binary,
     slugs_synthesizer_helper,
     sm_generation_helpers,
@@ -36,10 +42,16 @@ from flexbe_synthesis_slugs.helpers.slugs_automaton import (
 )
 from flexbe_synthesis_slugs.helpers.slugs_synthesizer_helper import SlugsSynthesizerHelper
 from flexbe_synthesis_slugs.helpers.sm_gen.sm_gen_config import SMGenConfig
+from flexbe_synthesis_slugs.helpers.strategy_auditor import (
+    PROTOCOL_VIOLATION,
+    StrategyAuditor,
+)
+from flexbe_synthesis_slugs.helpers.structured_slugs_parser import compiler as slugs_compiler
 from flexbe_synthesis_slugs.processes import (
     slugs_mealy_graph,
     slugs_sm_generator,
     slugs_synthesizer,
+    slugs_well_separation_analyzer,
 )
 from flexbe_synthesis_slugs.processes.slugs_activation_specification_parsed import (
     main as activation_spec_parsed_main,
@@ -157,6 +169,20 @@ def _patch_fake_slugs_process(monkeypatch, stdout_text, returncode):
         return _FakeSlugsProcess(args, stdout_text, returncode, **kwargs)
 
     monkeypatch.setattr(slugs_synthesizer_helper.subprocess, 'Popen', _popen)
+
+
+def _patch_fake_well_separation_process(monkeypatch, result_payload, returncode=0):
+    """Patch well-separation `Popen` and write the requested JSON artifact."""
+    _FakeSlugsProcess.instances = []
+
+    def _popen(args, **kwargs):
+        if result_payload is not None:
+            output_path = os.path.join(kwargs['cwd'], args[-1])
+            with open(output_path, 'w', encoding='utf-8') as output_file:
+                json.dump(result_payload, output_file)
+        return _FakeSlugsProcess(args, 'well separation done', returncode, **kwargs)
+
+    monkeypatch.setattr(slugs_well_separation_analyzer.subprocess, 'Popen', _popen)
 
 
 def test_slugs_spec_loader_loads_yaml_spec(tmp_path):
@@ -343,6 +369,29 @@ done
         assert yaml.safe_load(counts_file) == counts
 
 
+def test_slugs_count_specs_accepts_explicit_spec_name(tmp_path):
+    """Batch trial dirs are named trial_NN, so count_specs needs explicit spec name."""
+    trial_dir = tmp_path / 'trial_00'
+    byproducts_dir = trial_dir / 'synthesis_byproducts'
+    byproducts_dir.mkdir(parents=True)
+    structured_path = byproducts_dir / 'CoffeeSM.structuredslugs'
+    structured_path.write_text(
+        """\
+[INPUT]
+request
+
+[OUTPUT]
+done
+""",
+        encoding='utf-8',
+    )
+
+    (counts,) = count_specs_main([str(trial_dir), 'CoffeeSM']).process()
+
+    assert counts['structuredslugs'] == {'INPUT': 1, 'OUTPUT': 1}
+    assert (byproducts_dir / 'CoffeeSM.counts').exists()
+
+
 def test_slugs_spec_compiler_does_not_change_cwd(tmp_path, monkeypatch):
     """Spec compilation should not mutate process-global cwd."""
     cwd = tmp_path / 'caller_cwd'
@@ -369,7 +418,7 @@ def test_slugs_spec_compiler_does_not_change_cwd(tmp_path, monkeypatch):
 
 
 def test_slugs_spec_compiler_warns_on_mismatched_spec_name(tmp_path, capsys):
-    """Mismatched spec name logs a warning and uses gr1_specification spec_name for output files."""
+    """Mismatched spec name uses the gr1_specification name for output files."""
     spec_dir = tmp_path / 'demo_spec'
     gr1_specification = {
         'spec_name': 'other_name',
@@ -388,10 +437,66 @@ def test_slugs_spec_compiler_warns_on_mismatched_spec_name(tmp_path, capsys):
     assert slugsin_path.exists()
 
 
+def test_slugs_spec_compiler_accepts_primed_bool_guarding_numeric_copy(tmp_path):
+    """Primed Boolean propositions should not be tokenized as numeric IDs."""
+    spec_dir = tmp_path / 'demo_spec'
+    gr1_specification = {
+        'spec_name': 'demo_spec',
+        'env_props': {'x:0...2', 'done'},
+        'sys_props': {'act'},
+        'env_init': ['x = 0', '!done'],
+        'env_trans': ["!done' -> (x' = x)"],
+        'sys_init': ['!act'],
+        'sys_liveness': ['act'],
+    }
+
+    (error_code,) = spec_compiler_main([gr1_specification, str(spec_dir)]).process()
+
+    assert error_code.value == SynthesisErrorCode.SUCCESS
+    slugsin_path = spec_dir / 'synthesis_byproducts' / 'demo_spec.slugsin'
+    assert slugsin_path.exists()
+
+
+def test_structured_slugs_compiler_resets_globals_between_conversions(tmp_path):
+    """A Boolean AP in one conversion must not poison a later numeric AP of the same name."""
+    bool_spec = tmp_path / 'bool.structuredslugs'
+    bool_spec.write_text(
+        '\n'.join([
+            '[INPUT]',
+            'x',
+            '[OUTPUT]',
+            'done',
+            '[SYS_LIVENESS]',
+            'done',
+        ]),
+        encoding='utf-8',
+    )
+    numeric_spec = tmp_path / 'numeric.structuredslugs'
+    numeric_spec.write_text(
+        '\n'.join([
+            '[INPUT]',
+            'x:0...2',
+            '[OUTPUT]',
+            'done',
+            '[ENV_INIT]',
+            'x = 0',
+            '[ENV_TRANS]',
+            "done' -> (x' = x)",
+            '[SYS_LIVENESS]',
+            'done',
+        ]),
+        encoding='utf-8',
+    )
+
+    slugs_compiler.performConversion(str(bool_spec), thoroughly=True, fout=StringIO())
+    out = StringIO()
+    slugs_compiler.performConversion(str(numeric_spec), thoroughly=True, fout=out)
+
+    assert '[INPUT]' in out.getvalue()
+
+
 def test_slugs_spec_compiler_raises_on_conversion_oserror(tmp_path, monkeypatch):
     """An OSError from performConversion is wrapped as a compiler RuntimeError."""
-    from flexbe_synthesis_slugs.helpers.structured_slugs_parser import compiler as slugs_compiler
-
     spec_dir = tmp_path / 'demo_spec'
     gr1_specification = {
         'spec_name': 'demo_spec',
@@ -399,7 +504,11 @@ def test_slugs_spec_compiler_raises_on_conversion_oserror(tmp_path, monkeypatch)
         'sys_props': {'done'},
         'sys_liveness': ['done'],
     }
-    monkeypatch.setattr(slugs_compiler, 'performConversion', lambda *a, **kw: (_ for _ in ()).throw(OSError('disk full')))
+    monkeypatch.setattr(
+        slugs_compiler,
+        'performConversion',
+        lambda *a, **kw: (_ for _ in ()).throw(OSError('disk full')),
+    )
 
     with pytest.raises(RuntimeError, match="Could not compile 'demo_spec' to slugsin"):
         spec_compiler_main([gr1_specification, str(spec_dir)]).process()
@@ -411,7 +520,7 @@ def test_slugs_spec_compiler_main_binds_inputs():
     compiler = spec_compiler_main([gr1_spec, '/some/path'])
 
     assert isinstance(compiler, SlugsSpecCompiler)
-    assert compiler.gr1_specification is gr1_spec
+    assert compiler.gr1_specification == gr1_spec
     assert compiler.specs_output_dir_path == '/some/path'
 
 
@@ -520,6 +629,48 @@ def test_transition_specification_rejects_invalid_at_postcondition_as_value_erro
                 },
             }
         )
+
+
+def test_transition_specification_replaces_plain_props_with_numeric_mappings(tmp_path):
+    """Numeric variable mappings should not leave duplicate Boolean declarations."""
+    current_spec = {
+        'spec_name': 'demo_spec',
+        'env_props': {'choose_c'},
+        'sys_props': {'choose_a'},
+        'env_init': ['x=0'],
+        'env_trans': ["!choose_c' -> (x' = x)"],
+        'sys_liveness': ['choose_a'],
+    }
+    system_capabilities = {
+        'capabilities': {
+            'choose': {},
+        },
+        'sm_outcome_mappings': {},
+        'variable_mappings': {
+            'env_props': {
+                'x': {
+                    0: 'zero',
+                    1: 'one',
+                    2: 'two',
+                },
+            },
+        },
+        'action_postconditions': {
+            'choose': {
+                'completed': ['@x'],
+            },
+        },
+    }
+
+    (specification,) = transition_spec_main(
+        ['demo_spec', system_capabilities, current_spec]
+    ).process()
+
+    assert 'x:0...2' in specification['env_props']
+    assert 'x' not in specification['env_props']
+
+    (error_code,) = spec_compiler_main([specification, str(tmp_path / 'demo_spec')]).process()
+    assert error_code.value == SynthesisErrorCode.SUCCESS
 
 
 def test_request_specification_defaults_empty_success_outcome_to_finished():
@@ -887,7 +1038,7 @@ def _make_activation_spec_inst(action_variable_name='capability'):
     ],
 )
 def test_simplify_duplicate_capability_rhs(expr, expected):
-    """Each simplification branch of _simplify_duplicate_capability_rhs produces the expected output."""
+    """Each duplicate-capability RHS simplification branch produces expected output."""
     assert _make_activation_spec_inst()._simplify_duplicate_capability_rhs(expr) == expected
 
 
@@ -993,6 +1144,124 @@ def test_slugs_synthesizer_reports_missing_binary_as_failure(tmp_path, monkeypat
     assert error_code.value == SynthesisErrorCode.SYNTHESIS_FAILED
 
 
+def test_well_separation_analyzer_warns_and_continues_on_non_well_separated(
+    tmp_path,
+    monkeypatch,
+):
+    """Default policy should report non-well-separated specs without aborting."""
+    byproducts = tmp_path / 'demo' / 'synthesis_byproducts'
+    byproducts.mkdir(parents=True)
+    (byproducts / 'demo.slugsin').write_text('[INPUT]\nrequest\n', encoding='utf-8')
+    monkeypatch.setattr(
+        slugs_well_separation_analyzer,
+        'find_slugs_binary',
+        lambda: '/usr/bin/slugs',
+    )
+    _patch_fake_well_separation_process(
+        monkeypatch,
+        {
+            'format_version': '0.1',
+            'status': 'NON_WELL_SEPARATED',
+            'complete': True,
+            'violated_assumption_type': 'env_safety',
+        },
+    )
+
+    process = slugs_well_separation_analyzer.SlugsWellSeparationAnalyzer(
+        name='WellSep',
+        specs_output_dir_path=str(tmp_path / 'demo'),
+        spec_name='demo',
+    )
+    result, error_code = process.process()
+
+    assert result['status'] == 'NON_WELL_SEPARATED'
+    assert error_code.value == SynthesisErrorCode.SUCCESS
+    assert any('not well separated' in message for message in process.messages)
+
+
+def test_well_separation_analyzer_can_fail_on_non_well_separated(
+    tmp_path,
+    monkeypatch,
+):
+    """Fatal policy should stop the pipeline before synthesis."""
+    byproducts = tmp_path / 'demo' / 'synthesis_byproducts'
+    byproducts.mkdir(parents=True)
+    (byproducts / 'demo.slugsin').write_text('[INPUT]\nrequest\n', encoding='utf-8')
+    monkeypatch.setattr(
+        slugs_well_separation_analyzer,
+        'find_slugs_binary',
+        lambda: '/usr/bin/slugs',
+    )
+    _patch_fake_well_separation_process(
+        monkeypatch,
+        {'status': 'NON_WELL_SEPARATED', 'complete': True},
+    )
+
+    process = slugs_well_separation_analyzer.SlugsWellSeparationAnalyzer(
+        name='WellSep',
+        specs_output_dir_path=str(tmp_path / 'demo'),
+        spec_name='demo',
+        fail_on_non_well_separated=True,
+    )
+    _, error_code = process.process()
+
+    assert error_code.value == SynthesisErrorCode.SYNTHESIS_FAILED
+
+
+def test_well_separation_analyzer_defaults_to_fatal_on_incomplete(
+    tmp_path,
+    monkeypatch,
+):
+    """Analyzer execution errors should fail by default under the Slugs-version contract."""
+    byproducts = tmp_path / 'demo' / 'synthesis_byproducts'
+    byproducts.mkdir(parents=True)
+    (byproducts / 'demo.slugsin').write_text('[INPUT]\nrequest\n', encoding='utf-8')
+    monkeypatch.setattr(
+        slugs_well_separation_analyzer,
+        'find_slugs_binary',
+        lambda: '/usr/bin/slugs',
+    )
+    _patch_fake_well_separation_process(monkeypatch, None, returncode=2)
+
+    process = slugs_well_separation_analyzer.SlugsWellSeparationAnalyzer(
+        name='WellSep',
+        specs_output_dir_path=str(tmp_path / 'demo'),
+        spec_name='demo',
+    )
+    result, error_code = process.process()
+
+    assert result['status'] == 'ANALYSIS_ERROR'
+    assert error_code.value == SynthesisErrorCode.SYNTHESIS_FAILED
+
+
+def test_well_separation_analyzer_passes_minimize_core_flag(tmp_path, monkeypatch):
+    """Core reporting should be opt-in through the Slugs command flag."""
+    byproducts = tmp_path / 'demo' / 'synthesis_byproducts'
+    byproducts.mkdir(parents=True)
+    (byproducts / 'demo.slugsin').write_text('[INPUT]\nrequest\n', encoding='utf-8')
+    monkeypatch.setattr(
+        slugs_well_separation_analyzer,
+        'find_slugs_binary',
+        lambda: '/usr/bin/slugs',
+    )
+    _patch_fake_well_separation_process(
+        monkeypatch,
+        {'status': 'WELL_SEPARATED', 'complete': True},
+    )
+
+    process = slugs_well_separation_analyzer.SlugsWellSeparationAnalyzer(
+        name='WellSep',
+        specs_output_dir_path=str(tmp_path / 'demo'),
+        spec_name='demo',
+        minimize_core=True,
+    )
+    result, error_code = process.process()
+
+    assert error_code.value == SynthesisErrorCode.SUCCESS
+    assert result['minimize_core_requested'] is True
+    assert '--minimizeWellSeparationCore' in _FakeSlugsProcess.instances[0].args
+
+
 def test_slugs_synthesizer_reports_nonzero_status_as_failure(tmp_path, monkeypatch):
     """Slugs command crashes should not be reported as unrealizable specs."""
     helper = SlugsSynthesizerHelper(str(tmp_path / 'demo'), ['completed', 'failure'])
@@ -1046,6 +1315,960 @@ def test_slugs_synthesizer_reports_unrecognized_output_as_failure(tmp_path, monk
 
     assert automaton_file == ''
     assert error_code.value == SynthesisErrorCode.SYNTHESIS_FAILED
+
+
+def test_slugs_synthesizer_passes_reordering_threshold(tmp_path, monkeypatch):
+    """Requested CUDD reorder threshold should be passed through to Slugs."""
+    helper = SlugsSynthesizerHelper(
+        str(tmp_path / 'demo'),
+        ['completed', 'failure'],
+        reordering_threshold=250,
+    )
+    monkeypatch.setattr(
+        slugs_synthesizer_helper,
+        'find_slugs_binary',
+        lambda: '/usr/bin/slugs',
+    )
+    _patch_fake_slugs_process(
+        monkeypatch,
+        'RESULT: Specification is realizable.',
+        0,
+    )
+
+    automaton_file, error_code = helper.call_slugs_synthesizer('demo')
+
+    assert error_code.value == SynthesisErrorCode.SUCCESS
+    assert automaton_file == os.path.join(helper.specs_output_dir_path, 'demo.json')
+    assert '--reorder-threshold' in _FakeSlugsProcess.instances[0].args
+    assert '250' in _FakeSlugsProcess.instances[0].args
+
+
+def test_slugs_synthesizer_preserves_zero_next_reordering(tmp_path, monkeypatch):
+    """A reported CUDD next-reordering threshold of 0 should not be dropped."""
+    helper = SlugsSynthesizerHelper(str(tmp_path / 'demo'), ['completed', 'failure'])
+    monkeypatch.setattr(
+        slugs_synthesizer_helper,
+        'find_slugs_binary',
+        lambda: '/usr/bin/slugs',
+    )
+    _patch_fake_slugs_process(
+        monkeypatch,
+        'RESULT: Specification is realizable.\nCudd_ReadNextReordering: 0\n',
+        0,
+    )
+
+    _, error_code = helper.call_slugs_synthesizer('demo')
+
+    assert error_code.value == SynthesisErrorCode.SUCCESS
+    order_path = tmp_path / 'demo' / 'synthesis_byproducts' / 'demo.variable_order.json'
+    assert json.loads(order_path.read_text())['cudd_next_reordering'] == 0
+
+
+def test_matrix_row_parses_quoted_boolean_values(tmp_path):
+    """Quoted YAML booleans should not become truthy merely because they are strings."""
+    row = batch_run_harness.MatrixRow.from_dict({
+        'system_name': 'demo_system',
+        'spec_name': 'DemoSpec',
+        'spec_path': str(tmp_path / 'spec.yaml'),
+        'capabilities_path': str(tmp_path / 'capabilities.yaml'),
+        'encoding': 'one-hot',
+        'liveness': 'S',
+        'pending': 'False',
+        'reordering_enabled': 'False',
+    })
+
+    assert row.pending is False
+    assert row.reordering_enabled is False
+    assert row.reordering_policy == 'off'
+    assert row.audit_goals == row.goals
+
+
+def test_matrix_row_allows_separate_audit_goals(tmp_path):
+    """Matrix rows may separate request formulas from semantic audit outcomes."""
+    row = batch_run_harness.MatrixRow.from_dict({
+        'system_name': 'demo_system',
+        'spec_name': 'DemoSpec',
+        'spec_path': str(tmp_path / 'spec.yaml'),
+        'capabilities_path': str(tmp_path / 'capabilities.yaml'),
+        'encoding': 'one-hot',
+        'liveness': 'S',
+        'goals': ['log_finished'],
+        'audit_goals': ['finished'],
+    })
+
+    assert row.goals == ('log_finished',)
+    assert row.audit_goals == ('finished',)
+
+
+def test_flatten_well_separation_result_reports_core_fields():
+    """Well-separation JSON should become stable master.csv-style fields."""
+    fields = batch_run_harness.flatten_well_separation({
+        'result': {
+            'status': 'NON_WELL_SEPARATED',
+            'complete': True,
+            'violated_assumption_type': 'env_safety',
+            'cases': [{'case': 'env_safety_reachable_win'}],
+            'responsible_assumptions': [{'name': 'safe'}],
+            'warnings': ['auxiliary variables not separated'],
+            'elapsed_time': 1.25,
+            'timing': {'total': 1.25, 'core_minimization': 0.5},
+            'core_enabled': True,
+            'core_complete': True,
+            'core_candidate_count': 4,
+            'core_solver_calls': 7,
+            'core_assumptions': [
+                {'kind': 'ENV_TRANS', 'index': 2, 'source_index': 8, 'line': 42},
+                {'kind': 'ENV_INIT', 'index': 1, 'source_index': 3, 'line': 11},
+            ],
+            'artifact_path': '/tmp/demo.well_separation.json',
+            'output_path': '/tmp/demo.well_separation.output',
+        },
+        'error_code': SynthesisErrorCode.SUCCESS,
+    })
+
+    assert fields['well_separation_status'] == 'NON_WELL_SEPARATED'
+    assert fields['slugs_reported_elapsed_time_s'] == 1.25
+    assert fields['core_minimization_s'] == 0.5
+    assert fields['core_size'] == 2
+    assert fields['core_kinds'] == 'ENV_TRANS;ENV_INIT'
+    assert fields['core_indices'] == '2;1'
+    assert fields['core_source_indices'] == '8;3'
+    assert fields['core_lines'] == '42;11'
+    assert fields['well_separation_json_file'] == '/tmp/demo.well_separation.json'
+
+
+def test_extracted_sm_size_requires_realizable():
+    """An automaton dict alone can't tell 'no strategy' from 'a real one'.
+
+    `compile_and_synthesize` returns a dict-shaped `automaton` (e.g. `{}` or
+    `{'automaton': []}`) even on an unrealizable/fatal outcome, so
+    `slugs_sm_size`/`reduced_sm_size` must also gate on the `realizable` flag
+    -- otherwise unrealizable trials report a literal state count of `0`
+    instead of the `--` master.csv/table convention for "no strategy exists."
+    """
+    populated = {'automaton': [{'state': 0}, {'state': 1}, {'state': 2}]}
+
+    assert batch_run_harness._extracted_sm_size(populated, True) == 3
+    assert batch_run_harness._extracted_sm_size(populated, False) is None
+    assert batch_run_harness._extracted_sm_size({}, False) is None
+    assert batch_run_harness._extracted_sm_size({'automaton': []}, False) is None
+    assert batch_run_harness._extracted_sm_size(None, True) is None
+
+
+def test_batch_summary_includes_well_separation_fields(tmp_path):
+    """Grouped summaries should carry well-separation status and timing stats."""
+    master_path = tmp_path / 'master.csv'
+    summary_path = tmp_path / 'summary.csv'
+    refreshed_summary_path = tmp_path / 'refreshed_summary.csv'
+    rows = []
+    for elapsed in (1.0, 3.0):
+        row = {field: '' for field in batch_run_harness.CSV_FIELDNAMES}
+        row.update({
+            'capability_file': 'capabilities.yaml',
+            'encoding': 'one-hot',
+            'liveness': 'S',
+            'pending': 'False',
+            'ordering_mode': 'random',
+            'reordering_enabled': 'True',
+            'reordering_threshold': '250',
+            'reordering_policy': 'threshold_250',
+            'return_code': '0',
+            'realizable': 'True',
+            'well_separation_status': 'WELL_SEPARATED',
+            'well_separation_complete': 'True',
+            'slugs_reported_elapsed_time_s': str(elapsed),
+            'slugs_timing_total_s': str(elapsed),
+            'well_separation_wrapper_wall_time_s': '99.0',
+            'core_size': '0',
+            'spec_loader_time_s': '0.1',
+            'capability_spec_time_s': '0.2',
+            'compiler_time_s': '0.3',
+            'reduced_mealy_graph_time_s': '0.4',
+            'sm_generation_time_s': '0.5',
+            'sm_layout_time_s': '0.6',
+            'count_specs_time_s': '0.7',
+            'state_defn_size': '3',
+            'max_non_slugs_stage': 'sm_layout',
+            'max_non_slugs_time_s': str(5.0 + elapsed),
+            'non_slugs_total_time_s': str(6.0 + elapsed),
+        })
+        rows.append(row)
+    batch_run_harness.write_rows(master_path, rows)
+
+    batch_run_harness.write_summary(master_path, summary_path)
+
+    summary_rows = list(csv.DictReader(
+        summary_path.open(newline='', encoding='utf-8')
+    ))
+    assert len(summary_rows) == 1
+    summary = summary_rows[0]
+    assert summary['well_separation_status'] == 'WELL_SEPARATED'
+    assert summary['well_separation_complete'] == 'True'
+    assert summary['flexbe_hfsm_realized'] == 'Yes'
+    assert summary['generate_specs_time_s_mean'] == '0.6'
+    assert summary['realize_hfsm_time_s_mean'] == '2.2'
+    assert summary['well_separation_analyzer_time_s_mean'] == '2.0'
+    assert summary['slugs_reported_elapsed_time_s_mean'] == '2.0'
+    assert summary['slugs_reported_elapsed_time_s_min'] == '1.0'
+    assert summary['slugs_reported_elapsed_time_s_max'] == '3.0'
+    assert summary['max_non_slugs_stage'] == 'sm_layout'
+    assert summary['max_non_slugs_time_s_mean'] == '7.0'
+
+    experiment_postprocess.write_summary(master_path, refreshed_summary_path)
+    refreshed_rows = list(csv.DictReader(
+        refreshed_summary_path.open(newline='', encoding='utf-8')
+    ))
+    refreshed = refreshed_rows[0]
+    assert refreshed['well_separation_status'] == 'WELL_SEPARATED'
+    assert refreshed['flexbe_hfsm_realized'] == 'Yes'
+    assert refreshed['generate_specs_time_s_mean'] == '0.6'
+    assert refreshed['realize_hfsm_time_s_mean'] == '2.2'
+    assert refreshed['well_separation_analyzer_time_s_mean'] == '2.0'
+    assert refreshed['slugs_reported_elapsed_time_s_mean'] == '2.0'
+    assert refreshed['max_non_slugs_stage'] == 'sm_layout'
+    assert refreshed['max_non_slugs_time_s_mean'] == '7.0'
+
+
+def test_paper_table_rejects_duplicate_combined_indicators(tmp_path):
+    """Combined paper tables should not silently overwrite Coffee columns."""
+    summary_path = tmp_path / 'summary.csv'
+    table_path = tmp_path / 'table.tex'
+    fieldnames = [
+        'capability_file',
+        'encoding',
+        'liveness',
+        'pending',
+        'column_indicator',
+        'ordering_mode',
+        'reordering_policy',
+        'realizable',
+    ]
+    rows = [
+        {
+            'capability_file': 'coffee_capabilities.yaml',
+            'encoding': 'enumerated',
+            'liveness': 'S',
+            'pending': 'False',
+            'column_indicator': '2S',
+            'ordering_mode': 'random',
+            'reordering_policy': 'threshold_250',
+            'realizable': 'Yes',
+        },
+        {
+            'capability_file': 'coffee_capabilities.yaml',
+            'encoding': 'one-hot',
+            'liveness': 'S',
+            'pending': 'False',
+            'column_indicator': '2S',
+            'ordering_mode': 'random',
+            'reordering_policy': 'threshold_250',
+            'realizable': 'Yes',
+        },
+    ]
+    with summary_path.open('w', newline='', encoding='utf-8') as summary_file:
+        writer = csv.DictWriter(summary_file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    with pytest.raises(ValueError, match='--split-encoding-tables'):
+        experiment_postprocess.write_paper_table(summary_path, table_path)
+
+
+def test_paper_table_preserves_count_decimal_spread(tmp_path):
+    """Paper count rows should not hide random-ordering strategy-size spread."""
+    summary_path = tmp_path / 'summary.csv'
+    table_path = tmp_path / 'table.tex'
+    fieldnames = [
+        'capability_file',
+        'encoding',
+        'liveness',
+        'pending',
+        'column_indicator',
+        'ordering_mode',
+        'reordering_policy',
+        'realizable',
+        'n',
+        'slugs_sm_size_mean',
+        'slugs_sm_size_min',
+        'slugs_sm_size_max',
+        'slugs_sm_size_stdev',
+    ]
+    rows = [
+        {
+            'capability_file': 'coffee_capabilities.yaml',
+            'encoding': 'one-hot',
+            'liveness': 'S',
+            'pending': 'False',
+            'column_indicator': '2S',
+            'ordering_mode': 'random',
+            'reordering_policy': 'threshold_250',
+            'realizable': 'Yes',
+            'n': '200',
+            'slugs_sm_size_mean': '4.45',
+            'slugs_sm_size_min': '4',
+            'slugs_sm_size_max': '5',
+            'slugs_sm_size_stdev': '0.49874213637205833',
+        },
+        {
+            'capability_file': 'coffee_capabilities_extended.yaml',
+            'encoding': 'one-hot',
+            'liveness': 'S',
+            'pending': 'False',
+            'column_indicator': '3S',
+            'ordering_mode': 'random',
+            'reordering_policy': 'threshold_250',
+            'realizable': 'Yes',
+            'n': '200',
+            'slugs_sm_size_mean': '7.0',
+            'slugs_sm_size_min': '7',
+            'slugs_sm_size_max': '7',
+            'slugs_sm_size_stdev': '0.0',
+        },
+    ]
+    with summary_path.open('w', newline='', encoding='utf-8') as summary_file:
+        writer = csv.DictWriter(summary_file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    experiment_postprocess.write_paper_table(
+        summary_path,
+        table_path,
+        encoding='one-hot',
+    )
+
+    table = table_path.read_text(encoding='utf-8')
+    assert r'\textbf{\textbar{}Slugs SM\textbar} & 4.5 & 7 \\' in table
+    assert r'$\pm$ 0.5' in table
+    assert '7.0' not in table
+
+
+def test_paper_table_uses_ms_precision_for_coffee_scale_times(tmp_path):
+    """Coffee-scale timing rows should not collapse to whole-millisecond zeros."""
+    summary_path = tmp_path / 'summary.csv'
+    table_path = tmp_path / 'table.tex'
+    fieldnames = [
+        'capability_file',
+        'encoding',
+        'liveness',
+        'pending',
+        'column_indicator',
+        'ordering_mode',
+        'reordering_policy',
+        'realizable',
+        'n',
+        'realizability_time_s_mean',
+        'realizability_time_s_min',
+        'realizability_time_s_max',
+        'realizability_time_s_stdev',
+        'well_separation_analyzer_time_s_mean',
+        'well_separation_analyzer_time_s_stdev',
+    ]
+    row = {
+        'capability_file': 'coffee_capabilities.yaml',
+        'encoding': 'one-hot',
+        'liveness': 'S',
+        'pending': 'False',
+        'column_indicator': '2S',
+        'ordering_mode': 'random',
+        'reordering_policy': 'threshold_250',
+        'realizable': 'Yes',
+        'n': '10',
+        'realizability_time_s_mean': '0.00056',
+        'realizability_time_s_min': '0.00056',
+        'realizability_time_s_max': '0.00056',
+        'realizability_time_s_stdev': '0',
+        'well_separation_analyzer_time_s_mean': '0.000028',
+        'well_separation_analyzer_time_s_stdev': '0',
+    }
+    with summary_path.open('w', newline='', encoding='utf-8') as summary_file:
+        writer = csv.DictWriter(summary_file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerow(row)
+
+    experiment_postprocess.write_paper_table(
+        summary_path,
+        table_path,
+        encoding='one-hot',
+        time_unit='ms',
+    )
+
+    table = table_path.read_text(encoding='utf-8')
+    assert r'\shortstack{Realizability\\(ms)}} & 0.560 \\' in table
+    assert r'\shortstack{Well Separation\\(ms)}} & 0.028 \\' in table
+
+
+def test_paper_table_can_report_large_domain_times_in_seconds(tmp_path):
+    """PyRoboSim/Crazyflie-style tables should avoid accidental ms scaling."""
+    summary_path = tmp_path / 'summary.csv'
+    table_path = tmp_path / 'table.tex'
+    fieldnames = [
+        'capability_file',
+        'encoding',
+        'liveness',
+        'pending',
+        'column_indicator',
+        'ordering_mode',
+        'reordering_policy',
+        'realizable',
+        'n',
+        'overall_pipeline_time_s_mean',
+        'overall_pipeline_time_s_min',
+        'overall_pipeline_time_s_max',
+        'overall_pipeline_time_s_stdev',
+    ]
+    row = {
+        'capability_file': 'pyrobosim_capabilities.yaml',
+        'encoding': 'one-hot',
+        'liveness': 'S',
+        'pending': 'False',
+        'column_indicator': '2S',
+        'ordering_mode': 'random',
+        'reordering_policy': 'threshold_250',
+        'realizable': 'Yes',
+        'n': '3',
+        'overall_pipeline_time_s_mean': '600.0',
+        'overall_pipeline_time_s_min': '600.0',
+        'overall_pipeline_time_s_max': '600.0',
+        'overall_pipeline_time_s_stdev': '0',
+    }
+    with summary_path.open('w', newline='', encoding='utf-8') as summary_file:
+        writer = csv.DictWriter(summary_file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerow(row)
+
+    experiment_postprocess.write_paper_table(
+        summary_path,
+        table_path,
+        time_unit='s',
+    )
+
+    table = table_path.read_text(encoding='utf-8')
+    assert r'\shortstack{Overall\\(s)}} & 600 \\' in table
+    assert '600000' not in table
+
+
+def test_compare_summary_means_flags_order_of_magnitude_changes(tmp_path):
+    """Postprocess can warn when regenerated summary means drift dramatically."""
+    baseline_path = tmp_path / 'baseline.csv'
+    current_path = tmp_path / 'current.csv'
+    fieldnames = [
+        *experiment_postprocess.SUMMARY_KEYS,
+        'realizability_time_s_mean',
+    ]
+    base_row = {field: '' for field in fieldnames}
+    base_row.update({
+        'capability_file': 'coffee_capabilities.yaml',
+        'encoding': 'one-hot',
+        'liveness': 'S',
+        'pending': 'False',
+        'column_indicator': '2S',
+        'ordering_mode': 'random',
+        'reordering_policy': 'threshold_250',
+        'realizability_time_s_mean': '0.001',
+    })
+    current_row = dict(base_row)
+    current_row['realizability_time_s_mean'] = '0.02'
+    for path, row in ((baseline_path, base_row), (current_path, current_row)):
+        with path.open('w', newline='', encoding='utf-8') as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerow(row)
+
+    warnings = experiment_postprocess.compare_summary_means(
+        baseline_path,
+        current_path,
+        factor=10.0,
+    )
+
+    assert len(warnings) == 1
+    assert 'realizability_time_s_mean changed by 20.0x' in warnings[0]
+
+
+def test_batch_harness_runs_manager_like_post_synthesis_pipeline(monkeypatch, tmp_path):
+    """Batch trials should execute the same post-synthesis chain as manager requests."""
+    calls = []
+    automaton = {'automaton': [{'id': 0}]}
+    reduced_automaton = {'automaton': [{'id': 0}], 'reduced_automaton': True}
+    state_defn = [object(), object()]
+
+    class FakeProcess:
+        """Minimal process stand-in that records call order."""
+
+        def __init__(self, name, outputs):
+            self.name = name
+            self.outputs = outputs
+
+        def process(self):
+            calls.append(self.name)
+            return self.outputs
+
+    def fake_auditor(inputs):
+        name = 'reduced_audit' if inputs[0].get('reduced_automaton') else 'original_audit'
+        return FakeProcess(name, [
+            {'valid': True, 'incomplete': False, 'failure_kind': None},
+            SynthesisErrorCode(value=SynthesisErrorCode.SUCCESS),
+        ])
+
+    row = batch_run_harness.MatrixRow.from_dict({
+        'system_name': 'demo_system',
+        'spec_name': 'DemoSpec',
+        'spec_path': str(tmp_path / 'spec.yaml'),
+        'capabilities_path': str(tmp_path / 'capabilities.yaml'),
+        'encoding': 'one-hot',
+        'liveness': 'S',
+    })
+    args = SimpleNamespace(
+        skip_well_separation=True,
+        synthesis_timeout_s=60.0,
+        slugs_bin='slugs',
+        auditor_timeout_s=60.0,
+        mealy_graph_config={},
+        reduced_automaton_name='reduced_automaton',
+        use_fallback_layout=True,
+    )
+
+    def fake_build_spec(_row, _state_mappings, _system_capabilities, stage_times):
+        stage_times['spec_loader_time_s'] = 0.01
+        stage_times['request_spec_time_s'] = 0.02
+        return {}
+
+    monkeypatch.setattr(batch_run_harness, 'build_spec', fake_build_spec)
+    monkeypatch.setattr(
+        batch_run_harness,
+        'compiler_main',
+        lambda inputs: FakeProcess('compiler', [
+            SynthesisErrorCode(value=SynthesisErrorCode.SUCCESS),
+        ]),
+    )
+    monkeypatch.setattr(
+        batch_run_harness,
+        'synthesizer_main',
+        lambda inputs: FakeProcess('synthesizer', [
+            automaton,
+            SynthesisErrorCode(value=SynthesisErrorCode.SUCCESS),
+        ]),
+    )
+    monkeypatch.setattr(batch_run_harness, 'strategy_auditor_main', fake_auditor)
+    monkeypatch.setattr(
+        batch_run_harness,
+        'mealy_graph_main',
+        lambda inputs: FakeProcess(f'mealy:{inputs[2]}', [
+            SynthesisErrorCode(value=SynthesisErrorCode.SUCCESS),
+        ]),
+    )
+    monkeypatch.setattr(
+        batch_run_harness,
+        'reducer_main',
+        lambda inputs: FakeProcess('reducer', [
+            reduced_automaton,
+            SynthesisErrorCode(value=SynthesisErrorCode.SUCCESS),
+        ]),
+    )
+    monkeypatch.setattr(
+        batch_run_harness,
+        'sm_generator_main',
+        lambda inputs: FakeProcess('sm_generator', [
+            state_defn,
+            SynthesisErrorCode(value=SynthesisErrorCode.SUCCESS),
+        ]),
+    )
+    monkeypatch.setattr(
+        batch_run_harness,
+        'sm_layout_main',
+        lambda inputs: FakeProcess('sm_layout', [
+            inputs[0],
+            SynthesisErrorCode(value=SynthesisErrorCode.SUCCESS),
+        ]),
+    )
+    monkeypatch.setattr(
+        batch_run_harness,
+        'count_specs_main',
+        lambda inputs: FakeProcess('count_specs', [{}]),
+    )
+
+    (
+        result_automaton,
+        result_reduced,
+        error_code,
+        original_audit,
+        reduced_audit,
+        _well_separation,
+        stage_times,
+        result_state_defn,
+        _count_specs,
+    ) = batch_run_harness.compile_and_synthesize(
+        row, tmp_path, {}, {}, args,
+    )
+
+    assert result_automaton is automaton
+    assert result_reduced is reduced_automaton
+    assert error_code == SynthesisErrorCode.SUCCESS
+    assert original_audit['audit_valid'] is True
+    assert reduced_audit['audit_valid'] is True
+    assert result_state_defn == state_defn
+    assert calls == [
+        'compiler',
+        'synthesizer',
+        'original_audit',
+        'mealy:DemoSpec',
+        'reducer',
+        'reduced_audit',
+        'mealy:reduced_automaton',
+        'sm_generator',
+        'sm_layout',
+        'count_specs',
+    ]
+    expected_timed_fields = [
+        'spec_loader_time_s',
+        'request_spec_time_s',
+        'compiler_time_s',
+        'well_separation_wrapper_wall_time_s',
+        'synthesizer_time_s',
+        'original_auditor_time_s',
+        'mealy_graph_time_s',
+        'reduction_time_s',
+        'auditor_time_s',
+        'reduced_mealy_graph_time_s',
+        'sm_generation_time_s',
+        'sm_layout_time_s',
+        'count_specs_time_s',
+    ]
+    for field in expected_timed_fields:
+        assert isinstance(stage_times[field], float)
+    assert stage_times['well_separation_analyzer_time_s'] is None
+
+
+def test_batch_harness_original_auditor_failure_preempts_reduction(monkeypatch, tmp_path):
+    """Invalid original automata should stop before reduction or reduced audit."""
+    calls = []
+    automaton = {'automaton': [{'id': 0}]}
+
+    class FakeProcess:
+        """Minimal process stand-in that records call order."""
+
+        def __init__(self, name, outputs):
+            self.name = name
+            self.outputs = outputs
+
+        def process(self):
+            calls.append(self.name)
+            return self.outputs
+
+    row = batch_run_harness.MatrixRow.from_dict({
+        'system_name': 'demo_system',
+        'spec_name': 'DemoSpec',
+        'spec_path': str(tmp_path / 'spec.yaml'),
+        'capabilities_path': str(tmp_path / 'capabilities.yaml'),
+        'encoding': 'enumerated',
+        'liveness': 'S',
+    })
+    args = SimpleNamespace(
+        skip_well_separation=True,
+        synthesis_timeout_s=60.0,
+        slugs_bin='slugs',
+        auditor_timeout_s=60.0,
+    )
+
+    monkeypatch.setattr(
+        batch_run_harness,
+        'build_spec',
+        lambda _row, _state_mappings, _system_capabilities, _stage_times: {},
+    )
+    monkeypatch.setattr(
+        batch_run_harness,
+        'compiler_main',
+        lambda inputs: FakeProcess('compiler', [
+            SynthesisErrorCode(value=SynthesisErrorCode.SUCCESS),
+        ]),
+    )
+    monkeypatch.setattr(
+        batch_run_harness,
+        'synthesizer_main',
+        lambda inputs: FakeProcess('synthesizer', [
+            automaton,
+            SynthesisErrorCode(value=SynthesisErrorCode.SUCCESS),
+        ]),
+    )
+    monkeypatch.setattr(
+        batch_run_harness,
+        'strategy_auditor_main',
+        lambda inputs: FakeProcess('original_audit', [
+            {
+                'valid': False,
+                'incomplete': False,
+                'failure_kind': 'GOAL_UNREACHABLE',
+            },
+            SynthesisErrorCode(value=SynthesisErrorCode.AUTOMATON_INVALID),
+        ]),
+    )
+
+    def fail_if_reduced(_inputs):
+        raise AssertionError('reducer should not run after original audit failure')
+
+    monkeypatch.setattr(batch_run_harness, 'reducer_main', fail_if_reduced)
+
+    (
+        result_automaton,
+        result_reduced,
+        error_code,
+        original_audit,
+        reduced_audit,
+        _well_separation,
+        stage_times,
+        _state_defn,
+        _count_specs,
+    ) = batch_run_harness.compile_and_synthesize(
+        row, tmp_path, {}, {}, args,
+    )
+
+    assert result_automaton is automaton
+    assert result_reduced is None
+    assert error_code == SynthesisErrorCode.AUTOMATON_INVALID
+    assert original_audit['audit_failure_kind'] == 'GOAL_UNREACHABLE'
+    assert reduced_audit == batch_run_harness.empty_audit()
+    assert calls == ['compiler', 'synthesizer', 'original_audit']
+    assert isinstance(stage_times['original_auditor_time_s'], float)
+    assert stage_times['reduction_time_s'] is None
+
+
+def test_batch_harness_summarizes_and_writes_stage_timings(tmp_path):
+    """Detailed timings go to JSON while CSV carries the non-Slugs max stage."""
+    stage_times = batch_run_harness.empty_stage_times()
+    stage_times.update({
+        'spec_loader_time_s': 0.1,
+        'compiler_time_s': 0.4,
+        'synthesizer_time_s': 10.0,
+        'well_separation_analyzer_time_s': 9.0,
+        'sm_layout_time_s': 1.2,
+    })
+
+    summary = batch_run_harness.non_slugs_timing_summary(stage_times)
+    output_path = tmp_path / 'stage_timings.json'
+    batch_run_harness.write_stage_timing_json(output_path, stage_times)
+
+    assert summary['max_non_slugs_stage'] == 'sm_layout'
+    assert summary['max_non_slugs_time_s'] == 1.2
+    assert summary['non_slugs_total_time_s'] == pytest.approx(1.7)
+    payload = json.loads(output_path.read_text(encoding='utf-8'))
+    assert payload['synthesizer_time_s'] == 10.0
+    assert payload['sm_layout_time_s'] == 1.2
+
+
+def test_batch_harness_prepares_discrete_abstraction(monkeypatch, tmp_path):
+    """Batch preprocessing should generate the SM-generation abstraction artifact."""
+    calls = []
+    row = batch_run_harness.MatrixRow.from_dict({
+        'system_name': 'demo_system',
+        'spec_name': 'DemoSpec',
+        'spec_path': str(tmp_path / 'spec.yaml'),
+        'capabilities_path': str(tmp_path / 'capabilities.yaml'),
+        'encoding': 'one-hot',
+        'liveness': 'S',
+    })
+
+    class FakeWorkspaceParser:
+        """Workspace-parser stand-in."""
+
+        def __init__(self, inputs):
+            self.inputs = inputs
+
+        def preprocess(self):
+            return {'workspace': True}, []
+
+    class FakeCapabilityLoader:
+        """Capability-loader stand-in."""
+
+        def __init__(self, inputs):
+            self.inputs = inputs
+
+        def preprocess(self):
+            return (
+                {'capabilities': {}, 'sm_outcome_mappings': {}},
+                {'states': 'before'},
+                {'behaviors': 'before'},
+            )
+
+    class FakeTransitionGenerator:
+        """Transition-generator stand-in."""
+
+        def __init__(self, inputs):
+            self.inputs = inputs
+
+        def preprocess(self):
+            return (
+                self.inputs[1],
+                {},
+                {},
+                {},
+                {'states': 'after'},
+                {'behaviors': 'after'},
+            )
+
+    class FakeDiscreteGenerator:
+        """Discrete-abstraction-generator stand-in."""
+
+        def __init__(self, inputs):
+            self.inputs = inputs
+            self.synthesis_home = ''
+
+        def preprocess(self):
+            calls.append((self.inputs, self.synthesis_home))
+
+    monkeypatch.setattr(
+        batch_run_harness,
+        'workspace_parser_main',
+        lambda inputs: FakeWorkspaceParser(inputs),
+    )
+    monkeypatch.setattr(
+        batch_run_harness,
+        'capability_loader_main',
+        lambda inputs: FakeCapabilityLoader(inputs),
+    )
+    monkeypatch.setattr(
+        batch_run_harness,
+        'transition_relations_main',
+        lambda inputs: FakeTransitionGenerator(inputs),
+    )
+    monkeypatch.setattr(
+        batch_run_harness,
+        'discrete_abstraction_main',
+        lambda inputs: FakeDiscreteGenerator(inputs),
+    )
+    monkeypatch.setattr(
+        batch_run_harness,
+        'load_yaml',
+        lambda path: {'name': 'demo_system', 'transition_relations': {}},
+    )
+
+    batch_run_harness.prepare_system_capabilities(row, {}, synthesis_home=tmp_path)
+
+    assert calls == [([
+        'demo_system',
+        {'capabilities': {}, 'sm_outcome_mappings': {}, 'transition_relations': {}},
+        {'states': 'after'},
+        {'behaviors': 'after'},
+    ], tmp_path)]
+
+
+def test_batch_harness_skip_long_filters_pyrobosim_and_drone_rows(tmp_path):
+    """--skip-long should remove the expensive pyrobosim and drone examples."""
+    rows = [
+        batch_run_harness.MatrixRow.from_dict({
+            'example': 'coffee',
+            'system_name': 'coffee_maker',
+            'spec_name': 'CoffeeSpec',
+            'spec_path': str(tmp_path / 'coffee_spec.yaml'),
+            'capabilities_path': str(tmp_path / 'coffee_capabilities.yaml'),
+            'encoding': 'one-hot',
+            'liveness': 'S',
+        }),
+        batch_run_harness.MatrixRow.from_dict({
+            'example': 'pyrobosim',
+            'system_name': 'pyrobosim_demo',
+            'spec_name': 'PyRoboSpec',
+            'spec_path': str(tmp_path / 'pyro_spec.yaml'),
+            'capabilities_path': str(tmp_path / 'pyro_capabilities.yaml'),
+            'encoding': 'one-hot',
+            'liveness': 'S',
+        }),
+        batch_run_harness.MatrixRow.from_dict({
+            'example': 'two_rivers',
+            'system_name': 'river_demo',
+            'spec_name': 'DroneSurvey',
+            'spec_path': str(tmp_path / 'drone_spec.yaml'),
+            'capabilities_path': str(tmp_path / 'drone_capabilities.yaml'),
+            'encoding': 'one-hot',
+            'liveness': 'S',
+        }),
+    ]
+
+    filtered = batch_run_harness.filter_matrix_rows(rows, skip_long=True)
+
+    assert [row.example for row in filtered] == ['coffee']
+    assert batch_run_harness.filter_matrix_rows(rows, skip_long=False) == rows
+
+
+def test_latex_table_columns_are_data_driven_for_reordering_policies(tmp_path):
+    """Future threshold policies should appear without hard-coded table columns."""
+    summary_path = tmp_path / 'summary.csv'
+    output_path = tmp_path / 'table.tex'
+    fieldnames = [
+        *experiment_postprocess.SUMMARY_KEYS,
+        'n',
+        'failures',
+        'cudd_peak_nodes_mean',
+        'cudd_peak_nodes_min',
+        'cudd_peak_nodes_max',
+    ]
+    rows = [
+        {
+            'capability_file': 'capabilities.yaml',
+            'encoding': 'one-hot',
+            'liveness': 'S',
+            'pending': 'False',
+            'ordering_mode': 'random',
+            'reordering_enabled': 'True',
+            'reordering_threshold': '1000',
+            'reordering_policy': 'threshold_1000',
+            'n': '3',
+            'failures': '0',
+            'cudd_peak_nodes_mean': '42',
+            'cudd_peak_nodes_min': '42',
+            'cudd_peak_nodes_max': '42',
+        },
+    ]
+    with summary_path.open('w', newline='', encoding='utf-8') as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    experiment_postprocess.write_latex_table(summary_path, output_path)
+
+    table = output_path.read_text(encoding='utf-8')
+    assert 'Random threshold 1000' in table
+    assert 'T250' not in table
+    assert '42' in table
+
+
+def test_latex_table_mean_values_use_one_decimal_for_varied_runs(tmp_path):
+    """Mean table cells distinguish sampled averages from identical integer runs."""
+    summary_path = tmp_path / 'summary.csv'
+    output_path = tmp_path / 'table.tex'
+    fieldnames = [
+        *experiment_postprocess.SUMMARY_KEYS,
+        'n',
+        'failures',
+        'cudd_peak_nodes_mean',
+        'cudd_peak_nodes_min',
+        'cudd_peak_nodes_max',
+    ]
+    rows = [
+        {
+            'capability_file': 'capabilities.yaml',
+            'encoding': 'one-hot',
+            'liveness': 'S',
+            'pending': 'False',
+            'ordering_mode': 'random',
+            'reordering_enabled': 'True',
+            'reordering_threshold': '250',
+            'reordering_policy': 'threshold_250',
+            'n': '4',
+            'failures': '0',
+            'cudd_peak_nodes_mean': '42.25',
+            'cudd_peak_nodes_min': '41',
+            'cudd_peak_nodes_max': '43',
+        },
+    ]
+    with summary_path.open('w', newline='', encoding='utf-8') as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    experiment_postprocess.write_latex_table(summary_path, output_path)
+
+    table = output_path.read_text(encoding='utf-8')
+    assert '42.3' in table
+    assert '42.25' not in table
 
 
 def test_slugs_synthesizer_uses_cwd_without_changing_process_cwd(tmp_path, monkeypatch):
@@ -1558,6 +2781,93 @@ def test_sm_generation_normalizes_begin_game_bootstrap_variables():
     assert automaton['S1'].input_values == {'step_c': True}
 
 
+def test_parsed_sm_generation_preserves_action_userdata_remapping():
+    """Parsed actions materialized from outcomes retain their userdata map."""
+    initial = _make_sm_state(
+        'S0',
+        output_values={'capability': 1},
+        transitions=['S1'],
+    )
+    initial.is_initial = True
+    completed = _make_sm_state(
+        'S1',
+        input_variables=['step_c'],
+        input_values={'step_c': True},
+        output_values={'capability': 1},
+        transitions=['S1'],
+    )
+    automaton = SlugsAutomaton(
+        output_variables=['capability:0...1'],
+        input_variables=['step_c'],
+        states=[initial, completed],
+    )
+    automaton.update_state_map()
+    discrete_abstraction = {
+        'output': {},
+        'parsed_action_map': {'capability': {1: 'step_a'}},
+        'step_a': {
+            'class_decl': {'name': 'StepState', 'parameters': {}},
+            'state_outcome_mapping': {'step_c': ['done']},
+            'autonomy': 1,
+            'userdata_in': {'avoidance_radius': 'gate_radius'},
+        },
+    }
+
+    state_defs, error_code, warnings = (
+        sm_generation_helpers.SMGenerationHelpers().generate_sm_from_data(
+            automaton.to_dict(),
+            {},
+            discrete_abstraction,
+        )
+    )
+
+    step_state = next(state for state in state_defs if state.state_class == 'StepState')
+    assert step_state.userdata_keys == ['avoidance_radius']
+    assert step_state.userdata_remapping == ['gate_radius']
+    assert error_code == SynthesisErrorCode.SUCCESS
+    assert warnings == []
+
+
+def test_sm_generation_strips_begin_game_outcomes_when_action_never_fires():
+    """Hand-written specs that force '!begin_game_a' still expose begin_game_c/f."""
+    initial = SlugsAutomatonState(
+        name='S0',
+        output_valuation=0,
+        input_valuation=0,
+        transitions=['S1'],
+    )
+    initial.is_initial = True
+
+    action = SlugsAutomatonState(
+        name='S1',
+        output_valuation=1,
+        input_valuation=1,
+        transitions=['S1'],
+    )
+    action.input_variables = ['begin_game_c', 'begin_game_f', 'step_c']
+    action.input_values = {
+        'begin_game_c': True,
+        'begin_game_f': False,
+        'step_c': True,
+    }
+    action.output_variables = ['step_a']
+    action.output_values = {'step_a': True}
+
+    automaton = SlugsAutomaton(
+        output_variables=['step_a'],
+        input_variables=['begin_game_c', 'begin_game_f', 'step_c'],
+        states=[initial, action],
+    )
+    automaton.update_state_map()
+
+    sm_generation_helpers.SMGenerationHelpers().normalize_bootstrap_begin_game(automaton)
+
+    assert automaton.output_variables == ['step_a']
+    assert automaton.input_variables == ['step_c']
+    assert automaton['S1'].input_variables == ['step_c']
+    assert automaton['S1'].input_values == {'step_c': True}
+
+
 def test_sm_generation_rejects_non_initial_begin_game_activation():
     """begin_game_a should correspond to the initial state only."""
     initial = SlugsAutomatonState(
@@ -1713,6 +3023,115 @@ def test_get_next_state_input_conditions_ignores_input_values_when_input_variabl
     )
 
 
+# ── StrategyAuditor ───────────────────────────────────────────────────────────
+
+
+def _write_auditor_protocol_spec(tmp_path):
+    """Write a minimal spec that exposes activation -> next outcome semantics."""
+    spec_path = tmp_path / 'demo.slugsin'
+    spec_path.write_text(
+        '\n'.join([
+            '[INPUT]',
+            'log_failed_c',
+            '[OUTPUT]',
+            'log_failed_a',
+            '[ENV_TRANS]',
+            "log_failed_a -> log_failed_c'",
+            '',
+        ]),
+        encoding='utf-8',
+    )
+    return spec_path
+
+
+def _auditor_protocol_fixture():
+    system_capabilities = {
+        'transition_outcomes': ['completed'],
+        'capabilities': {
+            'log_failed': {
+                'state': {
+                    'outcomes': {
+                        'done': {'remapping': 'completed'},
+                    },
+                },
+            },
+        },
+    }
+    slugs_specification = {
+        'env_trans': ["log_failed_a -> log_failed_c'"],
+    }
+    automaton = {
+        'output_variables': ['log_failed_a'],
+        'input_variables': ['log_failed_c'],
+        'automaton': [
+            {
+                'name': 'S0',
+                'output_valuation': [0],
+                'input_valuation': [0],
+                'transitions': ['S1'],
+                'rank': 0,
+                'output_variables': [],
+                'input_variables': [],
+                'output_values': {},
+                'input_values': {},
+                'incoming': [],
+                'is_initial': True,
+            },
+            {
+                'name': 'S1',
+                'output_valuation': [0],
+                'input_valuation': [1],
+                'transitions': ['S1'],
+                'rank': 1,
+                'output_variables': [],
+                'input_variables': ['log_failed_c'],
+                'output_values': {},
+                'input_values': {'log_failed_c': True},
+                'incoming': [],
+                'is_initial': False,
+            },
+        ],
+    }
+    return automaton, system_capabilities, slugs_specification
+
+
+def test_strategy_auditor_flags_unexpected_outcome_on_raw_automaton(tmp_path):
+    """Raw strategies still enforce activation/outcome protocol strictly."""
+    spec_path = _write_auditor_protocol_spec(tmp_path)
+    automaton, system_capabilities, slugs_specification = _auditor_protocol_fixture()
+
+    result = StrategyAuditor(timeout_s=0).audit(
+        automaton,
+        str(spec_path),
+        system_capabilities,
+        {},
+        slugs_specification,
+        [],
+    )
+
+    assert result['valid'] is False
+    assert result['failure_kind'] == PROTOCOL_VIOLATION
+
+
+def test_strategy_auditor_relaxes_protocol_for_reduced_automaton(tmp_path):
+    """Reduced automata merge state input labels, so protocol audit relaxes them."""
+    spec_path = _write_auditor_protocol_spec(tmp_path)
+    automaton, system_capabilities, slugs_specification = _auditor_protocol_fixture()
+    automaton['reduced_automaton'] = True
+
+    result = StrategyAuditor(timeout_s=0).audit(
+        automaton,
+        str(spec_path),
+        system_capabilities,
+        {},
+        slugs_specification,
+        [],
+    )
+
+    assert result['valid'] is True
+    assert any('reduced automata' in warning for warning in result['warnings'])
+
+
 # ── SlugsSMReducer ────────────────────────────────────────────────────────────
 
 
@@ -1847,6 +3266,64 @@ def test_sm_reducer_merges_states_with_different_input_valuations():
     assert 'S0' in names
 
 
+def test_sm_reducer_does_not_merge_states_with_crossed_outcome_routing():
+    """
+    Two states must not merge just because their successor *names* end up equal.
+
+    P routes completed->A, failure->B. Q routes completed->B, failure->A --
+    crossed relative to P. A and B each separately, legitimately absorb one of
+    Q's own raw targets (M1 into A, M2 into B), because that collapse is
+    exactly what equals() is designed to allow: a leaf state that activates
+    the same next capability regardless of which outcome reached it is sound
+    to merge. But that means A and B end up reachable via both outcomes, so
+    P's and Q's transitions lists can end up equal as plain ordered lists
+    (['A', 'B'] == ['A', 'B']) purely as a side effect of M1/M2's names
+    sorting the same way A/B's do -- even though P and Q still route those two
+    outcomes to opposite targets.
+
+    Comparing raw `.transitions` (as the reducer did before this test was
+    added) would merge P and Q here. That is not just an academic risk: had
+    it happened, get_transitions would attach both 'completed' and 'failure'
+    as conditions to *both* of the merged state's outgoing edges, and
+    ConcurrentStateGenerator.add_internal_outcome_and_transition would
+    silently drop one of them (it no-ops when an outcome name is already
+    registered) -- an FlexBE SM with a transition silently missing or
+    misrouted, with no error raised anywhere in the pipeline.
+
+    equals() instead compares outcome_targets, computed once from the
+    pristine automaton before any target-side merging could introduce this
+    ambiguity, so P and Q must be judged distinct here.
+    """
+    automaton = _make_automaton_dict(
+        ('A', [0, 1, 0], []),
+        ('M1', [0, 1, 0], []),   # merges into A: same output, both terminal
+        ('B', [0, 0, 1], []),
+        ('M2', [0, 0, 1], []),   # merges into B: same output, both terminal
+        ('P', [1, 0, 0], ['A', 'B']),
+        ('Q', [1, 0, 0], ['M1', 'M2']),
+        # Root so P and Q are reachable and survive the unreachable-state
+        # pruning phase -- neither has any other incoming edge.
+        ('ROOT', [0, 0, 0, 1], ['P', 'Q']),
+    )
+    automaton['automaton'][0]['input_variables'] = ['completed']  # A
+    automaton['automaton'][1]['input_variables'] = ['failure']    # M1: Q's failure target
+    automaton['automaton'][2]['input_variables'] = ['failure']    # B
+    automaton['automaton'][3]['input_variables'] = ['completed']  # M2: Q's completed target
+    automaton['automaton'][4]['input_variables'] = ['branch_p']   # P: ROOT's edge to P
+    automaton['automaton'][5]['input_variables'] = ['branch_q']   # Q: ROOT's edge to Q
+
+    result_dict, error_code = sm_reducer_main([automaton]).process()
+
+    assert error_code.value == SynthesisErrorCode.SUCCESS
+    names = {s['name'] for s in result_dict['automaton']}
+    # A absorbs M1, B absorbs M2: 7 raw states -> 5 survivors, not 3.
+    assert len(names) == 5
+    # P and Q must NOT have been merged, despite ending up with the same
+    # successor-name set -- their per-outcome routing is opposite.
+    assert 'P' in names
+    assert 'Q' in names
+
+
 def test_sm_reducer_merges_states_differing_only_in_pending_bits():
     """
     States that differ only in pending (_p) output bits are merged into one SM state.
@@ -1883,7 +3360,13 @@ def test_sm_reducer_merges_states_differing_only_in_pending_bits():
 
 def test_sm_reducer_returns_failure_on_exception(monkeypatch):
     """Caught exceptions during reduction are returned as SM_GENERATION_FAILED."""
-    monkeypatch.setattr(SlugsAutomaton, 'from_dict', staticmethod(lambda d: (_ for _ in ()).throw(ValueError('synthetic failure'))))
+    monkeypatch.setattr(
+        SlugsAutomaton,
+        'from_dict',
+        staticmethod(
+            lambda d: (_ for _ in ()).throw(ValueError('synthetic failure'))
+        ),
+    )
 
     result_dict, error_code = sm_reducer_main(
         [{'output_variables': [], 'input_variables': [], 'automaton': []}]
@@ -1898,7 +3381,7 @@ def test_sm_reducer_main_binds_inputs():
     reducer = sm_reducer_main([automaton])
 
     assert isinstance(reducer, SlugsSMReducer)
-    assert reducer.synthesized_automaton is automaton
+    assert reducer.synthesized_automaton == automaton
 
 
 def test_sm_reducer_standalone_smoke_uses_in_repo_automaton():

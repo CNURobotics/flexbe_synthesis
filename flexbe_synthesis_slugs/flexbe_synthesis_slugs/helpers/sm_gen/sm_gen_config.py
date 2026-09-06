@@ -64,7 +64,7 @@ class SMGenConfig:
         self.parsed_index_to_action = {}
 
         try:
-            for act_var, var_config in self.config.items():
+            for act_var, var_config in list(self.config.items()):
                 if act_var in ('name', 'output', 'parsed_action_map'):
                     continue
 
@@ -100,6 +100,12 @@ class SMGenConfig:
                 for in_var in out_map.keys():
                     self.in_var_to_class_decl[in_var] = class_decl
                     self.in_var_to_out_var[in_var] = act_var
+                    self.config.setdefault(in_var, {})
+                    self.config[in_var].setdefault('class_decl', class_decl)
+                    self.config[in_var].setdefault(
+                        'autonomy',
+                        self._response_autonomy(var_config, in_var),
+                    )
 
             # Parsed-binary support: controller action encoded as one numeric output.
             parsed_action_var = None
@@ -211,6 +217,14 @@ class SMGenConfig:
             )
 
         return parsed_index_to_action
+
+    @staticmethod
+    def _response_autonomy(var_config, response_var):
+        """Return autonomy for a response variable from scalar or mapped config."""
+        autonomy = var_config.get('autonomy', 1)
+        if isinstance(autonomy, dict):
+            return autonomy.get(response_var, 1)
+        return autonomy
 
     def get_init_states(self):
         """
@@ -529,9 +543,37 @@ class SMGenConfig:
     def get_autonomy_list(self, conditions):
         """Return autonomy values for transition conditions."""
         try:
-            return [self.config[out_var]['autonomy'] for out_var, _ in conditions.items()]
+            return [
+                self._resolve_condition_autonomy(out_var, outcomes)
+                for out_var, outcomes in conditions.items()
+            ]
         except KeyError:
             raise SMGenError(SynthesisErrorCode.CONFIG_AUTONOMY_INVALID)
+
+    def _resolve_condition_autonomy(self, out_var, outcomes):
+        """Resolve one transition condition's autonomy to a scalar.
+
+        ``conditions`` here is keyed by substate/capability name (e.g. 'gr'),
+        so ``self.config[out_var]['autonomy']`` is the value
+        ``generate_discrete_abstraction.py`` built for that capability: a
+        plain scalar for flat autonomy, or a dict keyed by *abstract outcome*
+        name (e.g. 'gr_c'/'gr_f') for mapped, per-outcome autonomy. The
+        per-abstract-outcome scalars already resolved onto
+        ``self.config[abstract_outcome]['autonomy']`` during ``__init__``
+        aren't reachable from here directly, since ``out_var`` is the
+        capability name, not the abstract outcome name -- so resolve the
+        dict case by matching ``outcomes`` back to its abstract outcome via
+        ``self.activation_to_out_map``.
+        """
+        autonomy = self.config[out_var]['autonomy']
+        if not isinstance(autonomy, dict):
+            return autonomy
+
+        out_map = self.activation_to_out_map.get(out_var, {})
+        for abstract_outcome, concrete_outcomes in out_map.items():
+            if concrete_outcomes == outcomes:
+                return autonomy.get(abstract_outcome, 1)
+        return max(autonomy.values(), default=1)
 
     def get_userdata_mapping(self, var):
         """Allow list of unmapped keys, or dictionary of key to mapping."""

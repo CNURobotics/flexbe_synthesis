@@ -21,6 +21,7 @@ import traceback
 
 from flexbe_msgs.msg import StateInstantiation
 from flexbe_synthesis_core.base_process import BaseProcess
+from flexbe_synthesis_core.graph_utils import tarjan_scc
 from flexbe_synthesis_msgs.msg import SynthesisErrorCode
 
 try:
@@ -41,58 +42,6 @@ _LAYOUT_STATE_W, _LAYOUT_STATE_H = 170, 95
 _LAYOUT_OUTCOME_W, _LAYOUT_OUTCOME_H = 90, 50
 _LAYOUT_GAP_X, _LAYOUT_GAP_Y = 130, 80
 _LAYOUT_MARGIN_X, _LAYOUT_MARGIN_Y = 80, 60
-
-
-def _tarjan_scc(nodes, adjacency):
-    """Return strongly-connected components (iterative Tarjan, stdlib only)."""
-    index_counter = 0
-    stack = []
-    on_stack = set()
-    indices = {}
-    lowlinks = {}
-    components = []
-
-    for root in nodes:
-        if root in indices:
-            continue
-        indices[root] = index_counter
-        lowlinks[root] = index_counter
-        index_counter += 1
-        stack.append(root)
-        on_stack.add(root)
-        work = [(root, iter(adjacency.get(root, [])))]
-
-        while work:
-            node, nbrs = work[-1]
-            try:
-                neighbor = next(nbrs)
-            except StopIteration:
-                work.pop()
-                if work:
-                    parent = work[-1][0]
-                    lowlinks[parent] = min(lowlinks[parent], lowlinks[node])
-                if lowlinks[node] == indices[node]:
-                    component = []
-                    while stack:
-                        member = stack.pop()
-                        on_stack.remove(member)
-                        component.append(member)
-                        if member == node:
-                            break
-                    components.append(component)
-                continue
-
-            if neighbor not in indices:
-                indices[neighbor] = index_counter
-                lowlinks[neighbor] = index_counter
-                index_counter += 1
-                stack.append(neighbor)
-                on_stack.add(neighbor)
-                work.append((neighbor, iter(adjacency.get(neighbor, []))))
-            elif neighbor in on_stack:
-                lowlinks[node] = min(lowlinks[node], indices[neighbor])
-
-    return components
 
 
 def _neighbor_barycenter(name, neighbors, rank_lookup, order_lookup, target_rank):
@@ -151,7 +100,7 @@ def _fallback_layout(states):
         reverse_adjacency.setdefault(name, [])
 
     # SCC collapse
-    components = _tarjan_scc(all_names, adjacency)
+    components = tarjan_scc(all_names, adjacency)
     component_by_node = {node: idx for idx, comp in enumerate(components) for node in comp}
 
     comp_graph = defaultdict(set)

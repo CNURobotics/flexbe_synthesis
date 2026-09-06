@@ -15,11 +15,14 @@
 
 """Focused tests for GR(1) expression helper parsing."""
 
+import random
+
 from flexbe_synthesis_slugs.helpers.gr1_formula import (
     extract_leaf_expressions,
     get_vars_from_eqn,
     split_top_level,
 )
+from flexbe_synthesis_slugs.helpers.gr1_specification import order_variables
 
 
 def test_split_top_level_ignores_nested_operators():
@@ -65,4 +68,24 @@ def test_get_vars_from_eqn_preserves_first_seen_order():
         'ready',
         'ready',
         'mode',
+    ]
+
+
+def test_order_variables_supports_experiment_modes():
+    """Variable declaration ordering modes should be deterministic when seeded."""
+    names = ['gr_c', 'bd_a', 'capability:0...3', 'br_c']
+
+    assert order_variables(names, 'alphabetic') == sorted(names)
+    assert order_variables(names, 'dynamic') == sorted(names)
+    assert order_variables(names, 'domain') == [
+        'bd_a',
+        'br_c',
+        'capability:0...3',
+        'gr_c',
+    ]
+    assert order_variables(names, 'random', rng=random.Random(7)) == [
+        'gr_c',
+        'br_c',
+        'bd_a',
+        'capability:0...3',
     ]

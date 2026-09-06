@@ -26,10 +26,14 @@ class SlugsCountSpecs(BaseProcess):
     """Count per-section formulas for generated Slugs spec artifacts."""
 
     specs_output_dir_path: str
+    spec_name: str = ''
 
     def process(self):
         """Return section-count dictionaries for structuredslugs and slugsin files."""
-        spec_name = os.path.basename(self.specs_output_dir_path.rstrip('/'))
+        spec_name = (
+            self.spec_name
+            or os.path.basename(self.specs_output_dir_path.rstrip('/'))
+        )
         counts_dict = {}
         byproducts_dir = os.path.join(self.specs_output_dir_path, 'synthesis_byproducts')
 
@@ -74,4 +78,5 @@ def main(inputs):
     return SlugsCountSpecs(
         name='SlugsCountSpecs',
         specs_output_dir_path=inputs[0],
+        spec_name=inputs[1] if len(inputs) > 1 else '',
     )

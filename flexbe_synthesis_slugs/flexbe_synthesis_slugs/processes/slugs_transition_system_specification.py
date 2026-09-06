@@ -86,6 +86,8 @@ class SlugsTransitionSystemSpecification(BaseProcess):
                     new_var = f'{var}:{min_val}...{max_val}'
                     if self.verbose:
                         print(f"    Adding '{new_var}' to env_props")
+                    gr1_spec.env_props.discard(var)
+                    gr1_spec.sys_props.discard(var)
                     env_props.add(new_var)
                 except (KeyError, TypeError, ValueError) as exc:
                     print(f"Exception processing env_prop '{var}':\n{exc}", flush=True)
@@ -103,6 +105,8 @@ class SlugsTransitionSystemSpecification(BaseProcess):
                     new_var = f'{var}:{min_val}...{max_val}'
                     if self.verbose:
                         print(f"    Adding '{new_var}' to sys_props")
+                    gr1_spec.env_props.discard(var)
+                    gr1_spec.sys_props.discard(var)
                     sys_props.add(new_var)
                 except (KeyError, TypeError, ValueError) as exc:
                     print(f"Exception processing sys_prop '{var}':\n{exc}", flush=True)

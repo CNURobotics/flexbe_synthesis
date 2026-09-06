@@ -113,6 +113,17 @@ class SlugsSMReducer(BaseProcess):
             sa.update_state_map()
             print('Now process automaton and identify identical states ...', flush=True)
 
+            # Fix each state's per-outgoing-edge outcome label to its current target
+            # name, computed once while every target's own outcome_signature() is
+            # still unambiguous (before any equivalence-merging below has a chance to
+            # union two differently-reached targets into one). equals() compares
+            # these labeled mappings, not the raw transitions list, so that two
+            # states whose successor-*name* sets later coincide only because their
+            # individually-sound target merges happened to cross outcomes are not
+            # treated as equivalent. See SlugsAutomatonState.equals().
+            for name in sa:
+                sa[name].compute_outcome_targets(sa)
+
             # Pending bits (_p suffix) track "action was activated this step" — they are
             # set on entry to an action and carry no SM-level meaning.  Mask them out so
             # states that differ only in whether an action is "just activated" vs "already
@@ -188,6 +199,27 @@ class SlugsSMReducer(BaseProcess):
                                     )
                                 state.incoming.append(state3.name)
 
+                        # Keep state3's per-outcome routing labels pointed at the
+                        # surviving name too, or a later merge test involving state3
+                        # would compare a stale target name that no longer exists.
+                        state3.outcome_targets = {
+                            label: (state.name if target == state2.name else target)
+                            for label, target in state3.outcome_targets.items()
+                        }
+
+                    # equals() judges merge eligibility by outcome_targets, a dict
+                    # keyed by outcome_signature() -- equal length here relies on
+                    # outcome_signature() never colliding across a state's own
+                    # outgoing edges. Check explicitly so a violation of that
+                    # invariant is a clear diagnostic, not a bare IndexError.
+                    if len(state.transitions) != len(state2.transitions):
+                        raise ValueError(
+                            f"Cannot merge '{state.name}' and '{state2.name}': "
+                            'equal outcome_targets but different transition counts '
+                            f'({len(state.transitions)} vs {len(state2.transitions)}). '
+                            'Two transitions from the same state must be colliding on '
+                            'outcome_signature().'
+                        )
                     for idx3, out_name in enumerate(state2.transitions):
                         if state.transitions[idx3] != out_name:
                             raise ValueError(
@@ -234,7 +266,12 @@ class SlugsSMReducer(BaseProcess):
 
             sa.update_state_map()
             print(f'Ending with reduced {sa} ...', flush=True)
-            return [sa.to_dict(), SynthesisErrorCode(value=SynthesisErrorCode.SUCCESS)]
+            reduced_automaton = sa.to_dict()
+            reduced_automaton['reduced_automaton'] = True
+            return [
+                reduced_automaton,
+                SynthesisErrorCode(value=SynthesisErrorCode.SUCCESS),
+            ]
 
         except (AttributeError, IndexError, KeyError, OSError, TypeError, ValueError) as exc:
             print(f'slugs_sm_generation Error: {exc}', flush=True)

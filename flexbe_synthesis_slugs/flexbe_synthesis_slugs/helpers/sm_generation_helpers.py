@@ -111,7 +111,13 @@ class SMGenerationHelpers:
         from the tagged initial state so the existing null-root handling can
         promote the first real action state.  Outcome variables such as
         ``begin_game_c``/``begin_game_f`` are startup transition conditions and
-        are removed from all states.
+        are removed from all states -- independent of whether ``begin_game_a``
+        is ever asserted.  Several hand-written specs (e.g. two-rivers, wgcf)
+        permanently force ``!begin_game_a`` because the bootstrap log is
+        emitted by the pipeline initializer rather than Slugs, yet still
+        expose ``begin_game_c`` as a real ENV_INIT flag that must not leak
+        into the discrete abstraction, which never models ``begin_game`` as a
+        real state.
         """
         initial_state = next(
             (sa[name] for name in sa if sa[name].is_initial),
@@ -131,15 +137,19 @@ class SMGenerationHelpers:
                 f'the tagged initial state; found in {non_initial_bootstrap}.'
             )
 
-        if BOOTSTRAP_ACTION not in initial_state.output_variables:
-            return
-
-        if BOOTSTRAP_ACTION not in sa.output_variables:
+        has_bootstrap_action = BOOTSTRAP_ACTION in initial_state.output_variables
+        if has_bootstrap_action and BOOTSTRAP_ACTION not in sa.output_variables:
             raise ValueError(
                 'Invalid Slugs automaton: solver output violates the begin-game '
                 f'bootstrap invariant. {BOOTSTRAP_ACTION} appears on the tagged '
                 'initial state but is missing from automaton output_variables.'
             )
+
+        has_bootstrap_outcome = any(
+            self._is_bootstrap_begin_game_outcome(var) for var in sa.input_variables
+        )
+        if not has_bootstrap_action and not has_bootstrap_outcome:
+            return
 
         sa.input_variables = [
             var for var in sa.input_variables
@@ -160,14 +170,15 @@ class SMGenerationHelpers:
                 if not self._is_bootstrap_begin_game_outcome(var)
             }
 
-        initial_state.output_variables = [
-            var for var in initial_state.output_variables
-            if var != BOOTSTRAP_ACTION
-        ]
-        initial_state.output_values = {
-            var: value for var, value in initial_state.output_values.items()
-            if var != BOOTSTRAP_ACTION
-        }
+        if has_bootstrap_action:
+            initial_state.output_variables = [
+                var for var in initial_state.output_variables
+                if var != BOOTSTRAP_ACTION
+            ]
+            initial_state.output_values = {
+                var: value for var, value in initial_state.output_values.items()
+                if var != BOOTSTRAP_ACTION
+            }
 
         sa.update_state_map()
 
@@ -461,7 +472,12 @@ class SMGenerationHelpers:
                                     f"      add internal state for '{ss_name}' from condition "
                                     f"'{mapped_in_var}'"
                                 )
-                            csg.add_internal_state(ss_name, decl)
+                            clean_ss_name = clean_variable(ss_name)
+                            if clean_ss_name not in csg.internal_states:
+                                csg.add_internal_state(ss_name, decl)
+                                csg.add_internal_userdata(
+                                    helper.get_userdata_mapping(ss_name)
+                                )
 
                 is_concurrent = csg.is_concurrent()
                 if verbose:

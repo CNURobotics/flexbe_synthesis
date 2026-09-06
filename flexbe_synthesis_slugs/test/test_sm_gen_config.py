@@ -449,6 +449,85 @@ def test_get_transitions_maps_nonstandard_generic_outcome_to_active_response():
     assert config.get_transitions(state) == {'2': ['step_w']}
 
 
+def test_response_autonomy_list_uses_mapped_response_values():
+    """Response variables get autonomy from their abstract outcome mapping."""
+    automaton = SlugsAutomaton(
+        output_variables=['capability@0'],
+        input_variables=['completed', 'failure'],
+        states=[],
+    )
+
+    config = SMGenConfig(
+        {
+            'output': {},
+            'parsed_action_map': {'capability': {1: 'approval_a'}},
+            'approval_a': {
+                'class_decl': {'name': 'OperatorDecisionState', 'parameters': {}},
+                'state_outcome_mapping': {
+                    'approval_c': ['execute'],
+                    'approval_f': ['cancel'],
+                },
+                'autonomy': {
+                    'approval_c': 2,
+                    'approval_f': 3,
+                },
+            },
+        },
+        ['completed', 'failure'],
+        ['capability@0'],
+        automaton,
+    )
+
+    assert config.get_autonomy_list({
+        'approval_c': 'completed',
+        'approval_f': 'failure',
+    }) == [2, 3]
+
+
+def test_get_autonomy_list_resolves_mapped_dict_autonomy_from_substate_name():
+    """get_autonomy_list resolves mapped autonomy given the real caller's input shape.
+
+    sm_generation_helpers.py's actual call site builds its ``conditions``
+    dict keyed by *substate/capability name* (e.g. 'approval_a', from
+    ``get_substate_name``) with each value the *list* of concrete outcomes
+    for that transition (e.g. ``['execute']``), not the abstract-outcome-name
+    -> single-string shape the older test above exercises. Regression test
+    for the TypeError this shape used to trigger: ``self.config[out_var]
+    ['autonomy']`` is the *unresolved* dict for a capability-name key, and
+    get_autonomy_list must resolve it per outcome rather than return the
+    dict as-is.
+    """
+    automaton = SlugsAutomaton(
+        output_variables=['capability@0'],
+        input_variables=['completed', 'failure'],
+        states=[],
+    )
+
+    config = SMGenConfig(
+        {
+            'output': {},
+            'parsed_action_map': {'capability': {1: 'approval_a'}},
+            'approval_a': {
+                'class_decl': {'name': 'OperatorDecisionState', 'parameters': {}},
+                'state_outcome_mapping': {
+                    'approval_c': ['execute'],
+                    'approval_f': ['cancel'],
+                },
+                'autonomy': {
+                    'approval_c': 2,
+                    'approval_f': 3,
+                },
+            },
+        },
+        ['completed', 'failure'],
+        ['capability@0'],
+        automaton,
+    )
+
+    assert config.get_autonomy_list({'approval_a': ['execute']}) == [2]
+    assert config.get_autonomy_list({'approval_a': ['cancel']}) == [3]
+
+
 def _parsed_config(parsed_action_map=None):
     config = {
         'output': {},

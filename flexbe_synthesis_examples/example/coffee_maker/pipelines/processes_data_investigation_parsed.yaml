@@ -3,16 +3,20 @@
     spec_path: 'ros:spec_path'        # Use ROS 2 parameter or full path here
     verbose: 'ros:verbose'            # pass verbose:=true at launch to enable diagnostic output
     synthesis_timeout_s: 60.0         # Override default 15-minute Slugs timeout for examples
-    variable_ordering_mode: 'alphabetic'
-    variable_ordering_seed: 0
-    reordering_enabled: true
     well_separation_timeout_s: 60.0
     fail_on_non_well_separated: false
     fail_on_incomplete: true
     minimize_well_separation_core: false
     strategy_auditor_spec_path: ''    # Empty means use generated compiled .slugsin
-    strategy_auditor_goal_outcomes: [] # Empty means derive from mapped SM outcomes
-    strategy_auditor_timeout_s: 5.0
+    # Issue 1 investigation, parsed/enumerated-encoding variant: the enumerated
+    # encoding generalizes per-capability outcomes (bd_c/gr_c/br_c) into plain
+    # `completed`/`failure` inputs, so `br_c` never matches here. `completed` is a
+    # weaker goal criterion than the one-hot runs' `br_c` (it fires on ANY capability
+    # completing, not specifically brewing), but it's the only outcome-side signal
+    # this encoding exposes, and still catches "never completes anything" livelocks.
+    strategy_auditor_goal_outcomes: ['completed']
+    strategy_auditor_timeout_s: 30.0   # raised from 5s default; should no longer be needed
+                                        # to hit 120s now that the counter-explosion fix lands.
     use_fallback_layout: false        # set true to skip pygraphviz layout (faster, lower quality)
     reduced_automaton_name: 'coffee_automaton_reduced'
     mealy_graph_config:

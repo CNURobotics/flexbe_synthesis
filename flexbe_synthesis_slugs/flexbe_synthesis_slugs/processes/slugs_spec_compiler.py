@@ -15,6 +15,7 @@
 
 """Compile structured Slugs specifications into `.slugsin` files."""
 
+import json
 import os
 
 from flexbe_synthesis_core.base_process import BaseProcess
@@ -30,6 +31,9 @@ class SlugsSpecCompiler(BaseProcess):
 
     gr1_specification: dict
     specs_output_dir_path: str
+    variable_ordering_mode: str = 'alphabetic'
+    variable_ordering_seed: int | None = None
+    reordering_enabled: bool = True
 
     def process(self):
         """Write structured specs and compile them into `.slugsin` format."""
@@ -52,7 +56,12 @@ class SlugsSpecCompiler(BaseProcess):
         full_specs_output_dir_path = os.path.join(
             self.specs_output_dir_path, 'synthesis_byproducts'
         )
-        gr1_spec.write_structured_slugs_file(full_specs_output_dir_path)
+        gr1_spec.write_structured_slugs_file(
+            full_specs_output_dir_path,
+            variable_ordering_mode=self.variable_ordering_mode,
+            variable_ordering_seed=self.variable_ordering_seed,
+        )
+        self._write_variable_order_sidecar(gr1_spec, full_specs_output_dir_path)
 
         try:
             structured_slugs_file_path = os.path.join(
@@ -77,11 +86,35 @@ class SlugsSpecCompiler(BaseProcess):
 
         return [SynthesisErrorCode(value=SynthesisErrorCode.SUCCESS)]
 
+    def _write_variable_order_sidecar(self, gr1_spec, output_dir):
+        """Write requested variable-order metadata for experiment harnesses."""
+        order_path = os.path.join(
+            output_dir,
+            gr1_spec.spec_name + '.variable_order.json',
+        )
+        payload = {
+            'mode': self.variable_ordering_mode,
+            'seed': self.variable_ordering_seed,
+            'reordering_enabled': self.reordering_enabled,
+            'requested_input_order': gr1_spec.last_variable_order.get('input_order', []),
+            'requested_output_order': gr1_spec.last_variable_order.get('output_order', []),
+        }
+        with open(order_path, 'w', encoding='utf-8') as order_file:
+            json.dump(payload, order_file, indent=2)
+            order_file.write('\n')
+        print(f"Wrote variable-order metadata to '{order_path}'", flush=True)
+
 
 def main(inputs):
     """Create the Slugs spec compiler process."""
+    variable_ordering_mode = inputs[2] if len(inputs) > 2 else 'alphabetic'
+    variable_ordering_seed = inputs[3] if len(inputs) > 3 else None
+    reordering_enabled = inputs[4] if len(inputs) > 4 else True
     return SlugsSpecCompiler(
         name='SlugsSpecCompiler',
         gr1_specification=inputs[0],
         specs_output_dir_path=inputs[1],
+        variable_ordering_mode=variable_ordering_mode,
+        variable_ordering_seed=variable_ordering_seed,
+        reordering_enabled=reordering_enabled,
     )

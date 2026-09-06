@@ -3,20 +3,23 @@
     spec_path: 'ros:spec_path'        # Use ROS 2 parameter or full path here
     verbose: 'ros:verbose'            # pass verbose:=true at launch to enable diagnostic output
     synthesis_timeout_s: 60.0         # Override default 15-minute Slugs timeout for examples
-    variable_ordering_mode: 'alphabetic'
-    variable_ordering_seed: 0
-    reordering_enabled: true
     well_separation_timeout_s: 60.0
     fail_on_non_well_separated: false
     fail_on_incomplete: true
     minimize_well_separation_core: false
     strategy_auditor_spec_path: ''    # Empty means use generated compiled .slugsin
-    strategy_auditor_goal_outcomes: [] # Empty means derive from mapped SM outcomes
-    strategy_auditor_timeout_s: 5.0
-    use_fallback_layout: true         # set true to skip pygraphviz layout (faster, lower quality)
-    reduced_automaton_name: 'slugs_automaton_reduced'
+    # Issue 1 investigation: coffee has no sm_outcome_mappings (it's designed to loop
+    # forever in the normal case), so goal_outcomes resolves empty by default and the
+    # livelock check no-ops. br_c recurring forever is the intended behavior; this
+    # override makes the check verify every reachable cycle can still reach br_c again,
+    # which is what actually flags a quadcopter-style stuck-pending pathology if present.
+    strategy_auditor_goal_outcomes: ['br_c']
+    strategy_auditor_timeout_s: 30.0   # raised from 5s default; should no longer be needed
+                                        # to hit 120s now that the counter-explosion fix lands.
+    use_fallback_layout: false        # set true to skip pygraphviz layout (faster, lower quality)
+    reduced_automaton_name: 'coffee_automaton_reduced'
     mealy_graph_config:
-        draw_graph: false
+        draw_graph: true
         layout: 'dot'
         splines: true
         initial_state: true

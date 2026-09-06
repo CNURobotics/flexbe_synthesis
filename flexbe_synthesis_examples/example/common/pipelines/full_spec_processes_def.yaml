@@ -1,6 +1,8 @@
 # Process pipeline (runs per synthesis request) — full structured-slugs spec variant:
-#   spec_loader → request_spec → spec_compiler → synthesizer → mealy_graph
-#   → sm_reducer → mealy_graph(reduced) → sm_generator → sm_layout → count_specs
+#   spec_loader → request_spec → spec_compiler → well_separation_analyzer → synthesizer
+#   → mealy_graph → sm_reducer → mealy_graph(reduced) → sm_generator → sm_layout → count_specs
+# well_separation_analyzer requires a Slugs build with --checkWellSeparation; see
+# docs/well_separation_analyzer.md if you need to disable it.
 
 /types:
     ReducedAutomaton: Automaton
@@ -29,7 +31,22 @@
         inputs:
             slugs_specification: Specification
             specs_output_dir_path: FilePathStr
+            variable_ordering_mode: str
+            variable_ordering_seed: int
+            reordering_enabled: bool
         outputs:
+            error_code: SynthesisErrorCode
+    - entry_point:
+        name: slugs_well_separation_analyzer
+        inputs:
+            specs_output_dir_path: FilePathStr
+            spec_name: NameStr
+            well_separation_timeout_s: float
+            fail_on_non_well_separated: bool
+            fail_on_incomplete: bool
+            minimize_well_separation_core: bool
+        outputs:
+            well_separation_result: dict
             error_code: SynthesisErrorCode
     - entry_point:
         name: slugs_synthesizer
@@ -37,8 +54,24 @@
             specs_output_dir_path: FilePathStr
             state_mappings: Mappings
             synthesis_timeout_s: float
+            reordering_enabled: bool
         outputs:
             automaton: Automaton
+            error_code: SynthesisErrorCode
+    - entry_point:
+        name: strategy_auditor
+        inputs:
+            automaton: Automaton
+            specs_output_dir_path: FilePathStr
+            spec_name: NameStr
+            system_capabilities: SystemCapabilities
+            state_mappings: Mappings
+            slugs_specification: Specification
+            strategy_auditor_spec_path: FilePathStr
+            strategy_auditor_goal_outcomes: List[str]
+            strategy_auditor_timeout_s: float
+        outputs:
+            strategy_auditor_result: dict
             error_code: SynthesisErrorCode
     - entry_point:
         name: slugs_mealy_graph
@@ -55,6 +88,21 @@
             automaton: Automaton
         outputs:
             reduced_automaton: ReducedAutomaton
+            error_code: SynthesisErrorCode
+    - entry_point:
+        name: strategy_auditor
+        inputs:
+            reduced_automaton: ReducedAutomaton
+            specs_output_dir_path: FilePathStr
+            spec_name: NameStr
+            system_capabilities: SystemCapabilities
+            state_mappings: Mappings
+            slugs_specification: Specification
+            strategy_auditor_spec_path: FilePathStr
+            strategy_auditor_goal_outcomes: List[str]
+            strategy_auditor_timeout_s: float
+        outputs:
+            reduced_strategy_auditor_result: dict
             error_code: SynthesisErrorCode
     - entry_point:
         name: slugs_mealy_graph

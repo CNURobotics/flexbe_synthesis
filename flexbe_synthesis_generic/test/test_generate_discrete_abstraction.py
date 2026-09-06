@@ -241,6 +241,40 @@ def test_build_discrete_abstraction_returns_correct_structure():
     assert 'userdata_out' not in result
 
 
+def test_build_discrete_abstraction_preserves_mapped_outcome_autonomy():
+    """Mapped autonomy keeps distinct levels for each abstract response variable."""
+    generator = _generator()
+    generator.system_capabilities = {
+        'transition_outcomes': ['completed', 'failure'],
+        'capabilities': {
+            'approval': {
+                'interface': 'OperatorDecisionState',
+                'autonomy': {
+                    'execute': 2,
+                    'cancel': 3,
+                },
+                'state': {
+                    'outcomes': {
+                        'execute': {'remapping': 'completed'},
+                        'cancel': {'remapping': 'failure'},
+                    },
+                },
+            },
+        },
+    }
+
+    result = generator.build_discrete_abstraction('approval')
+
+    assert result['state_outcome_mapping'] == {
+        'approval_c': ['execute'],
+        'approval_f': ['cancel'],
+    }
+    assert result['autonomy'] == {
+        'approval_c': 2,
+        'approval_f': 3,
+    }
+
+
 def test_build_discrete_abstraction_includes_nonempty_userdata():
     """Non-empty userdata_in/out are remapping-compressed and included."""
     generator = _generator()
@@ -335,17 +369,28 @@ def test_build_state_outcome_mappings_raises_for_missing_interface_data():
 
 
 @pytest.mark.parametrize(
-    ('autonomy_config', 'expected'),
+    ('capability', 'expected'),
     [
-        (None, 1),
-        (2, 2),
-        ('3', 3),
-        ({'done': 2, 'failed': '4'}, 4),
+        ({}, 1),
+        ({'autonomy': 2}, 2),
+        ({'autonomy': '3'}, 3),
+        (
+            {'autonomy': {'done': 2, 'failed': '4'}},
+            {'demo_c': 2, 'demo_f': 4, 'demo_w': 1},
+        ),
     ],
 )
-def test_resolve_autonomy_accepts_supported_shapes(autonomy_config, expected):
+def test_resolve_autonomy_accepts_supported_shapes(capability, expected):
     """Autonomy accepts missing, scalar, and mapping configurations."""
-    assert _generator()._resolve_autonomy('demo_capability', autonomy_config) == expected
+    assert _generator()._resolve_autonomy(
+        'demo',
+        capability,
+        {
+            'demo_c': ['done'],
+            'demo_f': ['failed'],
+            'demo_w': [],
+        },
+    ) == expected
 
 
 @pytest.mark.parametrize(
@@ -359,4 +404,4 @@ def test_resolve_autonomy_accepts_supported_shapes(autonomy_config, expected):
 def test_resolve_autonomy_rejects_invalid_shapes(autonomy_config):
     """Invalid autonomy configurations should fail with capability context."""
     with pytest.raises((TypeError, ValueError), match="Invalid autonomy for 'demo'"):
-        _generator()._resolve_autonomy('demo', autonomy_config)
+        _generator()._resolve_autonomy('demo', {'autonomy': autonomy_config}, {})

@@ -18,9 +18,47 @@
 """GR(1) specification container with structured slugs serialization helpers."""
 
 import os
+import random
+import re
 
 from flexbe_synthesis_slugs.helpers.gr1_formula import get_vars_from_eqn
 import yaml
+
+
+_VALID_ORDERING_MODES = {'alphabetic', 'random', 'domain', 'dynamic'}
+_DOMAIN_SUFFIX_RE = re.compile(r'_(?:a|c|f|m)$')
+
+
+def order_variables(names, mode='alphabetic', rng=None):
+    """Return variables ordered for structured Slugs declaration blocks."""
+    mode = mode or 'alphabetic'
+    if mode not in _VALID_ORDERING_MODES:
+        raise ValueError(
+            f"Unknown variable ordering mode '{mode}'. "
+            f'Expected one of {sorted(_VALID_ORDERING_MODES)}.'
+        )
+
+    values = [name.strip() for name in names]
+    if mode in ('alphabetic', 'dynamic'):
+        return sorted(values)
+    if mode == 'random':
+        if rng is None:
+            rng = random.Random()
+        ordered = sorted(values)
+        rng.shuffle(ordered)
+        return ordered
+
+    return sorted(values, key=lambda value: (_domain_key(value), value))
+
+
+def _domain_key(name):
+    """Return a capability-ish grouping key for declaration ordering."""
+    stripped = name.strip()
+    if stripped.startswith('#'):
+        return ('~comment', stripped)
+    if ':' in stripped:
+        return (stripped.split(':', 1)[0], stripped)
+    return (_DOMAIN_SUFFIX_RE.sub('', stripped), stripped)
 
 
 class GR1Specification:
@@ -61,6 +99,7 @@ class GR1Specification:
         self.sys_init = {}
         self.sys_trans = []
         self.sys_liveness = []
+        self.last_variable_order = {}
 
     def update_composite_props(self):
         """Update derived proposition names for composite props (e.g., prop:state)."""
@@ -497,7 +536,12 @@ class GR1Specification:
             sort_keys=False,
         )
 
-    def write_structured_slugs_file(self, folder_path):
+    def write_structured_slugs_file(
+        self,
+        folder_path,
+        variable_ordering_mode='alphabetic',
+        variable_ordering_seed=None,
+    ):
         """Open a structuredslugs file and write all eight sections."""
         print(
             f"\nCreate structured slugs specification file for '{self.spec_name}' in "
@@ -512,16 +556,35 @@ class GR1Specification:
 
         full_file_path = os.path.join(folder_path, filename)
         with open(full_file_path, 'w', encoding='utf-8') as spec_file:
-            spec_file.write(self.structured_slugs_string())
+            spec_file.write(
+                self.structured_slugs_string(
+                    variable_ordering_mode=variable_ordering_mode,
+                    variable_ordering_seed=variable_ordering_seed,
+                )
+            )
 
         print(f"\nCreated specification file '{full_file_path}'\n", flush=True)
 
-    def structured_slugs_string(self):
+    def structured_slugs_string(
+        self,
+        variable_ordering_mode='alphabetic',
+        variable_ordering_seed=None,
+    ):
         """Return full .structuredslugs text for the current specification."""
         struct_slugs = ''
+        rng = random.Random(variable_ordering_seed)
 
-        struct_slugs += GR1Specification.__ordered_block_to_string(self.env_props, '[INPUT]')
-        struct_slugs += GR1Specification.__ordered_block_to_string(self.sys_props, '[OUTPUT]')
+        input_order = order_variables(self.env_props, variable_ordering_mode, rng)
+        output_order = order_variables(self.sys_props, variable_ordering_mode, rng)
+        self.last_variable_order = {
+            'mode': variable_ordering_mode,
+            'seed': variable_ordering_seed,
+            'input_order': list(input_order),
+            'output_order': list(output_order),
+        }
+
+        struct_slugs += GR1Specification.__ordered_block_to_string(input_order, '[INPUT]')
+        struct_slugs += GR1Specification.__ordered_block_to_string(output_order, '[OUTPUT]')
         struct_slugs += '\n'
 
         struct_slugs += GR1Specification.__ic_dict_to_string(self.env_init, '[ENV_INIT]')
@@ -554,7 +617,7 @@ class GR1Specification:
     @staticmethod
     def __ordered_block_to_string(block, header):
         string = f'{header}\n'
-        lines = sorted(block)
+        lines = list(block)
         if header == '[OUTPUT]':
             capability_decl = None
             capability_comments = []

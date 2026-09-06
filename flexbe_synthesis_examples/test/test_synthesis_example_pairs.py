@@ -55,6 +55,7 @@ class ExamplePair:
     request_defaults: dict
     expected_state_count: int
     requires_slugs: bool = True
+    expected_messages: tuple = ()
 
 
 class _GoalHandle:
@@ -308,6 +309,11 @@ EXAMPLE_PAIRS = (
         ),
         VENDING_REQUEST,
         expected_state_count=6,  # post-reduction: 6 states
+        expected_messages=(
+            'Warning: GR(1) specification is not well separated; synthesis will '
+            'continue because fail_on_non_well_separated is false '
+            '(assumption=env_liveness).',
+        ),
     ),
 )
 
@@ -414,7 +420,7 @@ def test_synthesis_server_request_pair_succeeds(example_pair, tmp_path):
 
     assert 'exception' not in result, result.get('exception')
     assert result['error_code'] == SynthesisErrorCode.SUCCESS
-    assert result['messages'] == [], result['messages']
+    assert result['messages'] == list(example_pair.expected_messages)
     assert result['state_count'] == example_pair.expected_state_count
     assert result['succeeded']
     assert not result['aborted']

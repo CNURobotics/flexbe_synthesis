@@ -29,6 +29,10 @@ class SlugsSynthesizer(BaseProcess):
     specs_output_dir_path: str
     state_mappings: dict
     synthesis_timeout_s: float = DEFAULT_SLUGS_TIMEOUT_S
+    reordering_enabled: bool = True
+    reordering_threshold: int | None = None
+    slugs_binary: str | None = None
+    spec_name: str | None = None
     _synthesizer: SlugsSynthesizerHelper | None = PrivateAttr(default=None)
 
     def process(self):
@@ -41,6 +45,10 @@ class SlugsSynthesizer(BaseProcess):
             verbose=self.verbose,
             show_slugs_output=True,
             slugs_timeout_s=self.synthesis_timeout_s,
+            reordering_enabled=self.reordering_enabled,
+            reordering_threshold=self.reordering_threshold,
+            slugs_binary=self.slugs_binary,
+            spec_name=self.spec_name,
         )
         self._synthesizer = synthesizer
 
@@ -75,9 +83,17 @@ class SlugsSynthesizer(BaseProcess):
 def main(inputs):
     """Create the slugs synthesizer process."""
     synthesis_timeout_s = inputs[2] if len(inputs) > 2 else DEFAULT_SLUGS_TIMEOUT_S
+    reordering_enabled = inputs[3] if len(inputs) > 3 else True
+    slugs_binary = inputs[4] if len(inputs) > 4 else None
+    spec_name = inputs[5] if len(inputs) > 5 else None
+    reordering_threshold = inputs[6] if len(inputs) > 6 else None
     return SlugsSynthesizer(
         name='Synthesizer',
         specs_output_dir_path=inputs[0],
         state_mappings=inputs[1],
         synthesis_timeout_s=synthesis_timeout_s,
+        reordering_enabled=reordering_enabled,
+        reordering_threshold=reordering_threshold,
+        slugs_binary=slugs_binary,
+        spec_name=spec_name,
     )

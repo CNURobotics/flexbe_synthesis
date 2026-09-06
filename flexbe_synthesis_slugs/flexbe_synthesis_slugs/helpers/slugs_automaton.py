@@ -148,6 +148,12 @@ class SlugsAutomatonState:
         self.input_values = {}
         self.incoming = []
         self.is_initial = False
+        # Per-outgoing-edge outcome label -> current target name, established
+        # once from the pristine (pre-merge) automaton via compute_outcome_targets()
+        # and kept in sync as merges rename targets. See equals() for why this,
+        # rather than a target's own (mergeable, unioned) outcome_signature, is
+        # what merge eligibility must be judged against.
+        self.outcome_targets = {}
 
     @classmethod
     def from_dict(cls, data):
@@ -188,13 +194,57 @@ class SlugsAutomatonState:
             'is_initial': self.is_initial,
         }
 
+    def outcome_signature(self):
+        """
+        Return a hashable signature of the outcome(s) that lead to this state.
+
+        Mirrors the primary source SMGenConfig._get_next_state_input_conditions
+        uses to label an outgoing edge: a state's own input_variables when
+        non-empty, else its truthy input_values keys. Two states reached via
+        genuinely different environment outcomes must never collapse to the
+        same signature, or a predecessor's per-outcome routing to them
+        becomes indistinguishable after merging.
+        """
+        if self.input_variables:
+            return frozenset(self.input_variables)
+        return frozenset(key for key, value in self.input_values.items() if value)
+
+    def compute_outcome_targets(self, automaton):
+        """
+        Populate outcome_targets from the automaton as it currently stands.
+
+        Must be called once, for every state, before any equivalence-merging
+        begins (right after pruning) -- at that point every target's own
+        outcome_signature() is still unambiguous, since no target has yet
+        absorbed another target reached via a different outcome. Recording
+        the label now and only ever renaming its *value* afterward (see the
+        merge step in slugs_sm_reducer.py) keeps this per-edge mapping
+        accurate even once targets later become ambiguous themselves.
+        """
+        mapping = {}
+        for name in self.transitions:
+            target = automaton[name]
+            if target is None:
+                continue
+            mapping[target.outcome_signature()] = name
+        self.outcome_targets = mapping
+
     def equals(self, other, pending_mask=0, verbose=False):
         """
-        Return True when output valuation and transitions are equivalent.
+        Return True when output valuation and per-outcome routing are equivalent.
 
         input_valuation is intentionally ignored: states reachable from different
         environment conditions but producing the same outputs and successors are
-        equivalent for SM generation purposes.
+        equivalent for SM generation purposes. What must NOT be ignored is which
+        outcome leads to which successor: comparing outcome_targets (computed once
+        from the pristine automaton, see compute_outcome_targets) rather than the
+        raw transitions list catches the case where two states have the same
+        *set* of successor names only because their individually-sound target
+        merges happen to have crossed -- e.g. one state goes completed->A,
+        failure->B while the other goes completed->B, failure->A. Comparing
+        successor-name sets alone cannot tell those two cases apart; comparing
+        outcome_targets can, because its keys were fixed before any target-side
+        merging introduced that ambiguity.
 
         pending_mask is a bitmask of output-variable positions that carry pending
         flags (variables whose name ends in ``_p``).  These bits are masked out
@@ -213,7 +263,7 @@ class SlugsAutomatonState:
         ):
             return False
 
-        if self.transitions != other.transitions:
+        if self.outcome_targets != other.outcome_targets:
             return False
 
         if verbose and self.input_valuation != other.input_valuation:

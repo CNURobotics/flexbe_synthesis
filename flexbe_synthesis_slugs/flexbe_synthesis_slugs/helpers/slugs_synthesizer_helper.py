@@ -44,14 +44,18 @@ class SlugsSynthesizerHelper:
 
     def __init__(self, specs_output_dir_path, transition_outcomes, sm_outcomes=None,
                  verbose=False, show_slugs_output=True,
-                 slugs_timeout_s=DEFAULT_SLUGS_TIMEOUT_S):
+                 slugs_timeout_s=DEFAULT_SLUGS_TIMEOUT_S,
+                 reordering_enabled=True,
+                 reordering_threshold=None,
+                 slugs_binary=None,
+                 spec_name=None):
         if sm_outcomes is None:
             sm_outcomes = ['finished', 'failed']
         self.slugs_timeout_s = float(slugs_timeout_s)
         if self.slugs_timeout_s <= 0:
             raise ValueError('slugs_timeout_s must be greater than zero')
 
-        self.spec_name = os.path.basename(specs_output_dir_path)
+        self.spec_name = spec_name or os.path.basename(specs_output_dir_path)
 
         self.specs_output_dir_path = os.path.join(
             specs_output_dir_path,
@@ -85,6 +89,13 @@ class SlugsSynthesizerHelper:
         self.sm_outcomes = sm_outcomes
         self.verbose = verbose
         self.show_slugs_output = show_slugs_output
+        self.reordering_enabled = bool(reordering_enabled)
+        self.reordering_threshold = (
+            int(reordering_threshold) if reordering_threshold not in (None, '') else None
+        )
+        if self.reordering_threshold is not None and self.reordering_threshold <= 0:
+            raise ValueError('reordering_threshold must be a positive integer')
+        self.slugs_binary = slugs_binary
         self._process = None
         self._process_lock = threading.Lock()
         self._canceled = False
@@ -182,7 +193,11 @@ class SlugsSynthesizerHelper:
     def call_slugs_synthesizer(self, name):
         """Call slugs to synthesize an automaton from `.slugsin` input."""
         options = ['--explicitStrategy', '--jsonOutput']
-        slugs_binary = find_slugs_binary()
+        if not self.reordering_enabled:
+            options.append('--no-reorder')
+        if self.reordering_threshold is not None:
+            options.extend(['--reorder-threshold', str(self.reordering_threshold)])
+        slugs_binary = self.slugs_binary or find_slugs_binary()
         if slugs_binary is None:
             message = f'SLUGS is not installed. {slugs_install_hint()}'
             print(f'[ltl_synthesizer] {message}', flush=True)
@@ -211,6 +226,7 @@ class SlugsSynthesizerHelper:
         output_path = os.path.join(self.specs_output_dir_path, name + '.output')
         with open(output_path, 'w', encoding='utf-8') as output_file:
             output_file.write(f'{slugs_cmd_string}\n\n{slugs_output}')
+        self._merge_variable_order_metadata(name, slugs_output)
 
         if timed_out:
             print(self._timeout_help_message(), flush=True)
@@ -233,13 +249,128 @@ class SlugsSynthesizerHelper:
                 return '', SynthesisErrorCode(value=SynthesisErrorCode.SPEC_UNSYNTHESIZABLE)
 
             return '', SynthesisErrorCode(value=SynthesisErrorCode.SYNTHESIS_FAILED)
-        else:
+
+        print(
+            f'[ltl_synthesizer] SLUGS command failed with status: {status}\n'
+            f"Have you installed slugs?\n Output: '{slugs_output}'",
+            flush=True,
+        )
+        return '', SynthesisErrorCode(value=SynthesisErrorCode.SYNTHESIS_FAILED)
+
+    def _merge_variable_order_metadata(self, name, slugs_output):
+        """Merge actual Slugs/CUDD ordering metadata into the sidecar JSON."""
+        order_path = os.path.join(self.specs_output_dir_path, name + '.variable_order.json')
+        try:
+            if os.path.exists(order_path):
+                with open(order_path, encoding='utf-8') as order_file:
+                    payload = json.load(order_file)
+            else:
+                payload = {}
+            payload.update({
+                'reordering_enabled_requested': self.reordering_enabled,
+                'reordering_threshold_requested': self.reordering_threshold,
+                'cudd_reordering_enabled_reported': self._parse_reordering_enabled(
+                    slugs_output
+                ),
+                'cudd_next_reordering': self._parse_first_cudd_int(
+                    slugs_output,
+                    ('CUDD next reordering', 'Cudd_ReadNextReordering'),
+                ),
+                'cudd_reorderings': self._parse_cudd_int(
+                    slugs_output,
+                    'CUDD reorderings',
+                ),
+                'cudd_reordering_time_s': self._parse_cudd_ms_as_s(
+                    slugs_output,
+                    'CUDD reordering time',
+                ),
+                'final_variable_order': self._parse_final_variable_order(slugs_output),
+            })
+            with open(order_path, 'w', encoding='utf-8') as order_file:
+                json.dump(payload, order_file, indent=2)
+                order_file.write('\n')
+        except (OSError, TypeError, ValueError) as exc:
             print(
-                f'[ltl_synthesizer] SLUGS command failed with status: {status}\n'
-                f"Have you installed slugs?\n Output: '{slugs_output}'",
+                f'\033[33mCould not update variable-order metadata: {exc}\033[0m',
                 flush=True,
             )
-            return '', SynthesisErrorCode(value=SynthesisErrorCode.SYNTHESIS_FAILED)
+
+    @staticmethod
+    def _parse_reordering_enabled(slugs_output):
+        """Return reported CUDD dynamic-reordering status, if present."""
+        for line in slugs_output.splitlines():
+            if 'CUDD dynamic reordering' not in line:
+                continue
+            value = line.rsplit(':', 1)[-1].strip().lower()
+            if value in ('enabled', 'on', 'true'):
+                return True
+            if value in ('disabled', 'off', 'false'):
+                return False
+        return None
+
+    @staticmethod
+    def _parse_cudd_int(slugs_output, label):
+        """Parse one integer-valued CUDD stats line."""
+        for line in slugs_output.splitlines():
+            if label not in line and label.lower() not in line.lower():
+                continue
+            try:
+                return int(line.rsplit(':', 1)[-1].strip().split()[0])
+            except (IndexError, ValueError):
+                return None
+        return None
+
+    @classmethod
+    def _parse_first_cudd_int(cls, slugs_output, labels):
+        """Parse the first present integer-valued CUDD stat across labels."""
+        for label in labels:
+            value = cls._parse_cudd_int(slugs_output, label)
+            if value is not None:
+                return value
+        return None
+
+    @staticmethod
+    def _parse_cudd_float(slugs_output, label):
+        """Parse one float-valued CUDD stats line."""
+        for line in slugs_output.splitlines():
+            if label not in line:
+                continue
+            try:
+                return float(line.rsplit(':', 1)[-1].strip().split()[0])
+            except (IndexError, ValueError):
+                return None
+        return None
+
+    @classmethod
+    def _parse_cudd_ms_as_s(cls, slugs_output, label):
+        """Parse a CUDD stats line reported in milliseconds and convert to seconds."""
+        value = cls._parse_cudd_float(slugs_output, label)
+        return None if value is None else value / 1000.0
+
+    @staticmethod
+    def _parse_final_variable_order(slugs_output):
+        """Parse the post-sifting CUDD variable-order block, if Slugs reports it."""
+        order = []
+        in_block = False
+        for line in slugs_output.splitlines():
+            stripped = line.strip()
+            if stripped.startswith('CUDD variable order'):
+                in_block = True
+                continue
+            if not in_block:
+                continue
+            if not stripped:
+                break
+            if ':' not in stripped:
+                break
+            try:
+                _, rest = stripped.split(':', 1)
+                name = rest.strip().split()[0]
+            except IndexError:
+                break
+            if name:
+                order.append(name)
+        return order
 
     @staticmethod
     def _get_process_rss_mb(pid):

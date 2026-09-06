@@ -24,6 +24,17 @@ numberAPNofBits = {}
 translatedNames = {}
 
 
+def reset_parser_context():
+    """Reset parser globals so independent conversions cannot contaminate each other."""
+    global p
+    booleanAPs.clear()
+    numberAPs.clear()
+    numberAPLimits.clear()
+    numberAPNofBits.clear()
+    translatedNames.clear()
+    p = Parser()
+
+
 # =====================================================
 # Lexer for the LTL formulas
 # =====================================================
@@ -54,7 +65,11 @@ def tokenize(text):
                 res.append((currentSymbol,))
             else:
                 currentSymbol = m.group(0)
-                if currentSymbol in booleanAPs:
+                base_symbol = (
+                    currentSymbol[:-1]
+                    if currentSymbol.endswith("'") else currentSymbol
+                )
+                if currentSymbol in booleanAPs or base_symbol in booleanAPs:
                     res.append(('boolID', m.group(0)))
                 else:
                     res.append(('numID', m.group(0)))
@@ -649,6 +664,7 @@ def isValidRecursiveSlugsProperty(tokens):
 # ============================================
 def performConversion(inputFile, thoroughly, fout):
     """Read, translate, and write a complete structured Slugs specification."""
+    reset_parser_context()
     specFile = open(inputFile)
     mode = ''
     lines = {

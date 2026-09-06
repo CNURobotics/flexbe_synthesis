@@ -84,7 +84,12 @@ class GenerateDiscreteAbstraction(BasePreProcess):
     def build_discrete_abstraction(self, abstraction_name):
         """Build one discrete-abstraction capability block."""
         capability = self.system_capabilities['capabilities'][abstraction_name]
-        autonomy = self._resolve_autonomy(abstraction_name, capability.get('autonomy'))
+        state_outcome_mappings = self.build_state_outcome_mappings(abstraction_name)
+        autonomy = self._resolve_autonomy(
+            abstraction_name,
+            capability,
+            state_outcome_mappings,
+        )
 
         if 'behavior' in capability:
             class_decl = {
@@ -100,9 +105,7 @@ class GenerateDiscreteAbstraction(BasePreProcess):
 
         abstraction = {
             'class_decl': class_decl,
-            'state_outcome_mapping': self.build_state_outcome_mappings(
-                abstraction_name
-            ),
+            'state_outcome_mapping': state_outcome_mappings,
             'autonomy': autonomy,
         }
 
@@ -130,8 +133,9 @@ class GenerateDiscreteAbstraction(BasePreProcess):
 
         return abstraction
 
-    def _resolve_autonomy(self, abstraction_name, autonomy_config):
-        """Resolve scalar or mapping autonomy configuration to one integer value."""
+    def _resolve_autonomy(self, abstraction_name, capability, state_outcome_mappings):
+        """Resolve autonomy for each abstract transition outcome."""
+        autonomy_config = capability.get('autonomy')
         if autonomy_config is None:
             return 1
 
@@ -147,17 +151,21 @@ class GenerateDiscreteAbstraction(BasePreProcess):
             )
 
         print(f"  '{abstraction_name}' - {autonomy_config}", flush=True)
-        autonomy = 1
-        for key, value in autonomy_config.items():
-            autonomy = max(
-                autonomy,
-                self._parse_autonomy_value(
-                    abstraction_name,
-                    value,
-                    f" mapping key '{key}'",
-                ),
+        parsed_autonomy = {
+            key: self._parse_autonomy_value(
+                abstraction_name,
+                value,
+                f" mapping key '{key}'",
             )
-        return autonomy
+            for key, value in autonomy_config.items()
+        }
+        return {
+            abstract_outcome: max(
+                [parsed_autonomy.get(outcome, 1) for outcome in concrete_outcomes],
+                default=1,
+            )
+            for abstract_outcome, concrete_outcomes in state_outcome_mappings.items()
+        }
 
     def _parse_autonomy_value(self, abstraction_name, value, context=''):
         """Parse one autonomy value and report invalid configuration clearly."""
