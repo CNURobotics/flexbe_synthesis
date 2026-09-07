@@ -3394,6 +3394,71 @@ def test_sm_reducer_merges_states_differing_only_in_pending_bits():
     assert set(survivor['transitions']) == {'S1', survivor['name']}
 
 
+def test_sm_reducer_defaults_to_fixed_point():
+    """Default reduction keeps sweeping until it reaches a fixed point."""
+    automaton = _make_automaton_dict(
+        ('ROOT', [0], ['P', 'Q']),
+        ('P', [1], ['A']),
+        ('Q', [1], ['B']),
+        ('A', [2], []),
+        ('B', [2], []),
+    )
+
+    result_dict, error_code = sm_reducer_main([automaton]).process()
+
+    assert error_code.value == SynthesisErrorCode.SUCCESS
+    names = {s['name'] for s in result_dict['automaton']}
+    assert names == {'ROOT', 'P', 'A'}
+
+
+def test_sm_reducer_can_run_to_fixed_point(capsys):
+    """A second sweep can merge states made equivalent by an earlier merge."""
+    automaton = _make_automaton_dict(
+        ('ROOT', [0], ['P', 'Q']),
+        ('P', [1], ['A']),
+        ('Q', [1], ['B']),
+        ('A', [2], []),
+        ('B', [2], []),
+    )
+
+    result_dict, error_code = sm_reducer_main([automaton, None]).process()
+
+    assert error_code.value == SynthesisErrorCode.SUCCESS
+    names = {s['name'] for s in result_dict['automaton']}
+    assert names == {'ROOT', 'P', 'A'}
+    output = capsys.readouterr().out
+    assert 'Reduction reached fixed point after 3 sweep(s); elapsed ' in output
+
+
+def test_sm_reducer_honors_max_merge_sweeps(capsys):
+    """A finite sweep limit stops before fixed point when more changes remain."""
+    automaton = _make_automaton_dict(
+        ('ROOT', [0], ['P', 'Q']),
+        ('P', [1], ['A']),
+        ('Q', [1], ['B']),
+        ('A', [2], []),
+        ('B', [2], []),
+    )
+
+    result_dict, error_code = sm_reducer_main([automaton, 1]).process()
+
+    assert error_code.value == SynthesisErrorCode.SUCCESS
+    names = {s['name'] for s in result_dict['automaton']}
+    assert names == {'ROOT', 'P', 'Q', 'A'}
+    output = capsys.readouterr().out
+    assert 'Reduction stopped after max sweeps (1); elapsed ' in output
+
+
+def test_sm_reducer_rejects_invalid_max_merge_sweeps():
+    """Sweep limits must be positive integers or None."""
+    automaton = {'output_variables': [], 'input_variables': [], 'automaton': []}
+
+    result_dict, error_code = sm_reducer_main([automaton, 0]).process()
+
+    assert error_code.value == SynthesisErrorCode.SM_GENERATION_FAILED
+    assert result_dict['automaton'] == []
+
+
 def test_sm_reducer_returns_failure_on_exception(monkeypatch):
     """Caught exceptions during reduction are returned as SM_GENERATION_FAILED."""
     monkeypatch.setattr(
@@ -3412,12 +3477,13 @@ def test_sm_reducer_returns_failure_on_exception(monkeypatch):
 
 
 def test_sm_reducer_main_binds_inputs():
-    """main() factory wires synthesized_automaton from pipeline inputs."""
+    """main() factory wires reducer inputs from pipeline inputs."""
     automaton = {'output_variables': [], 'input_variables': [], 'automaton': []}
-    reducer = sm_reducer_main([automaton])
+    reducer = sm_reducer_main([automaton, None])
 
     assert isinstance(reducer, SlugsSMReducer)
     assert reducer.synthesized_automaton == automaton
+    assert reducer.max_reduction_sweeps is None
 
 
 def test_sm_reducer_standalone_smoke_uses_in_repo_automaton():

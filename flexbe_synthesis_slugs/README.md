@@ -302,6 +302,10 @@ by flag rather than by graph structure.
 ## Automaton Reduction Contract
 
 `SlugsSMReducer` applies two equivalence rules during the state-merging phase.
+By default it keeps sweeping until the automaton reaches a fixed point.  Pass a
+positive integer as the optional `max_reduction_sweeps` reducer input to stop
+after at most that many sweeps.  The reducer prints the number of completed
+sweeps and the elapsed merge-sweep time before returning.
 
 **Input-valuation equivalence.**
 Two states are equivalent when their `output_valuation` and `transitions`

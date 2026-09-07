@@ -14,6 +14,7 @@
     strategy_auditor_goal_outcomes: [] # Empty means derive from mapped SM outcomes
     strategy_auditor_timeout_s: 5.0
     use_fallback_layout: false        # set true to skip pygraphviz layout (faster, lower quality)
+    max_reduction_sweeps: null        # null means sweep reduction until fixed point
     reduced_automaton_name: 'coffee_automaton_reduced'
     mealy_graph_config:
         draw_graph: true

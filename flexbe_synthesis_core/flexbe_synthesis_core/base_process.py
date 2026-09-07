@@ -43,6 +43,11 @@ class BaseProcess(BaseModel, abc.ABC):
     # Accumulated diagnostic messages (warnings, errors) surfaced to the UI.
     messages: list = Field(default_factory=list)
 
+    class Config:
+        """Allow process inputs and outputs to include ROS message instances."""
+
+        arbitrary_types_allowed = True
+
     @abc.abstractmethod
     def process(self):
         """

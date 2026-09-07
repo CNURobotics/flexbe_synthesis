@@ -129,6 +129,7 @@
         name: slugs_sm_reducer
         inputs:
             automaton: Automaton
+            max_reduction_sweeps: None
         outputs:
             reduced_automaton: ReducedAutomaton
             error_code: SynthesisErrorCode

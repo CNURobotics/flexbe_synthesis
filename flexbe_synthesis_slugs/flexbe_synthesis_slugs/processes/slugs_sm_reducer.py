@@ -15,6 +15,7 @@
 
 """Reduce synthesized Slugs automata by pruning and merging equivalent states."""
 
+import time
 import traceback
 
 from flexbe_synthesis_core.base_process import BaseProcess
@@ -26,10 +27,203 @@ class SlugsSMReducer(BaseProcess):
     """Pipeline process that simplifies an automaton in-place."""
 
     synthesized_automaton: dict
+    max_reduction_sweeps: int | None = None
+
+    def _prune_unreachable_states(self, sa):
+        """Remove states with no incoming edges, except the protected initial state."""
+        removed_one = True
+        count = 0
+        while removed_one and sa.size() > 0:
+            removed_one = False
+            if self.verbose:
+                print(
+                    '    Removing unreachable states with no incoming transitions '
+                    f'(count {count}) ... ',
+                    flush=True,
+                )
+            count += 1
+
+            state_keys = list(sa)
+            for idx, name in enumerate(state_keys):
+                state = sa[name]
+                if len(state.incoming) != 0:
+                    continue
+
+                if self.verbose:
+                    print(
+                        f"    Removing {idx} '{state.name}' with zero incoming connections.",
+                        flush=True,
+                    )
+                for out_name in state.transitions:
+                    next_state = sa[out_name]
+                    if next_state is None:
+                        print(
+                            f"\033[31mFailed to remove '{state.name}' with "
+                            'zero incoming transitions\033[0m',
+                            flush=True,
+                        )
+                        print(
+                            f"\033[31m   Unknown transition to '{out_name}'\033[0m",
+                            flush=True,
+                        )
+                        raise IndexError(
+                            f"Failed to remove '{state.name}' with transition to '{out_name}'"
+                        )
+                    next_state.incoming.remove(state.name)
+
+                removed_state = sa.pop(state.name)
+                if removed_state is not state:
+                    raise ValueError(
+                        f"Removed wrong state instance for '{state.name}'."
+                    )
+                removed_one = True
+
+    def _merge_equivalent_states_once(self, sa, pending_mask):
+        """Run one equivalence-merge sweep and return True if it changed `sa`."""
+        changed = False
+        state_keys = list(sa)
+        for idx, name in enumerate(state_keys):
+            state = sa[name]
+            if state is None:
+                if self.verbose:
+                    print(
+                        f"    Already removed '{name}' from this automaton ...", flush=True
+                    )
+                continue
+
+            if self.verbose:
+                print(f"    Checking '{state.name}' for equivalents ...", flush=True)
+            for idx2 in range(idx + 1, len(state_keys)):
+                other_name = state_keys[idx2]
+                state2 = sa[other_name]
+                if state2 is None or not state.equals(state2, pending_mask,
+                                                      verbose=self.verbose):
+                    continue
+
+                if self.verbose:
+                    print(
+                        f"    Removing equivalent state {idx2} '{state2.name}' to '{state.name}'",
+                        flush=True,
+                    )
+
+                for incoming_name in state2.incoming:
+                    state3 = sa[incoming_name]
+                    if state3 is None:
+                        print(
+                            f"\033[31mFailed to remove '{state2.name}' equal "
+                            f"to '{state.name}'\033[0m",
+                            flush=True,
+                        )
+                        print(
+                            f"\033[31m   Unknown transition from '{incoming_name}'\033[0m",
+                            flush=True,
+                        )
+                        raise IndexError(
+                            f"Failed to remove '{state2.name}' equal to '{state.name}'"
+                        )
+
+                    for idx3, trans in enumerate(state3.transitions):
+                        if trans != state2.name:
+                            continue
+                        if self.verbose:
+                            print(
+                                f"        Updating '{state3.name}' transition {idx3} "
+                                f"({state3.transitions[idx3]}) with '{state.name}'",
+                                flush=True,
+                            )
+                        state3.transitions[idx3] = state.name
+                        if state3.name not in state.incoming:
+                            if self.verbose:
+                                print(
+                                    f"    Adding '{state3.name}' to incoming list "
+                                    f"for '{state.name}'",
+                                    flush=True,
+                                )
+                            state.incoming.append(state3.name)
+
+                    # Keep state3's per-outcome routing labels pointed at the
+                    # surviving name too, or a later merge test involving state3
+                    # would compare a stale target name that no longer exists.
+                    state3.outcome_targets = {
+                        label: (state.name if target == state2.name else target)
+                        for label, target in state3.outcome_targets.items()
+                    }
+
+                # equals() judges merge eligibility by outcome_targets, a dict
+                # keyed by outcome_signature() -- equal length here relies on
+                # outcome_signature() never colliding across a state's own
+                # outgoing edges. Check explicitly so a violation of that
+                # invariant is a clear diagnostic, not a bare IndexError.
+                if len(state.transitions) != len(state2.transitions):
+                    raise ValueError(
+                        f"Cannot merge '{state.name}' and '{state2.name}': "
+                        'equal outcome_targets but different transition counts '
+                        f'({len(state.transitions)} vs {len(state2.transitions)}). '
+                        'Two transitions from the same state must be colliding on '
+                        'outcome_signature().'
+                    )
+                for idx3, out_name in enumerate(state2.transitions):
+                    if state.transitions[idx3] != out_name:
+                        raise ValueError(
+                            f"Mismatch on transitions for '{state.name}' "
+                            f"and '{state2.name}'"
+                        )
+                    state3 = sa[out_name]
+                    if state3 is None:
+                        print(
+                            f"\033[31mFailed to remove '{state2.name}' equal "
+                            f"to '{state.name}'\033[0m",
+                            flush=True,
+                        )
+                        print(
+                            f"\033[31m   Unknown transition to '{out_name}'\033[0m",
+                            flush=True,
+                        )
+                        raise IndexError(
+                            f"Failed to remove '{state2.name}' equal to '{state.name}'"
+                        )
+
+                    for idx4, trans in enumerate(state3.incoming):
+                        if trans == state2.name:
+                            if self.verbose:
+                                print(
+                                    f"        Updating '{state3.name}' incoming "
+                                    f"[{idx4}] ({state3.incoming[idx4]}) with '{state.name}'",
+                                    flush=True,
+                                )
+                            state3.incoming[idx4] = state.name
+
+                # Preserve all activation predicates carried by equivalent states.
+                state.input_variables = sorted(
+                    set(state.input_variables + state2.input_variables)
+                )
+                if state2.is_initial:
+                    state.is_initial = True
+
+                removed_state = sa.pop(state2.name)
+                if removed_state is not state2:
+                    raise ValueError(
+                        f"Removed wrong state instance for '{state2.name}'."
+                    )
+                changed = True
+
+        return changed
+
+    def _validate_max_reduction_sweeps(self):
+        """Return the configured sweep limit after checking its type and range."""
+        max_sweeps = self.max_reduction_sweeps
+        if max_sweeps is None:
+            return None
+        if isinstance(max_sweeps, bool) or not isinstance(max_sweeps, int):
+            raise TypeError('max_reduction_sweeps must be an int or None.')
+        if max_sweeps < 1:
+            raise ValueError('max_reduction_sweeps must be at least 1, or None.')
+        return max_sweeps
 
     def process(self):
         """Reduce the automaton and return `[automaton_dict, error_code]`."""
         try:
+            max_sweeps = self._validate_max_reduction_sweeps()
             sa = SlugsAutomaton.from_dict(self.synthesized_automaton)
             print(f'Starting with {sa} ...', flush=True)
 
@@ -63,53 +257,7 @@ class SlugsSMReducer(BaseProcess):
 
             # Remove states with no incoming edges (unreachable roots).
             # The initial state is protected by its sentinel incoming entry.
-            removed_one = True
-            count = 0
-            while removed_one and sa.size() > 0:
-                removed_one = False
-                if self.verbose:
-                    print(
-                        '    Removing unreachable states with no incoming transitions '
-                        f'(count {count}) ... ',
-                        flush=True,
-                    )
-                count += 1
-
-                state_keys = list(sa)
-                for idx, name in enumerate(state_keys):
-                    state = sa[name]
-                    if len(state.incoming) != 0:
-                        continue
-
-                    if self.verbose:
-                        print(
-                            f"    Removing {idx} '{state.name}' with zero incoming connections.",
-                            flush=True,
-                        )
-                    for out_name in state.transitions:
-                        next_state = sa[out_name]
-                        if next_state is None:
-                            print(
-                                f"\033[31mFailed to remove '{state.name}' with "
-                                'zero incoming transitions\033[0m',
-                                flush=True,
-                            )
-                            print(
-                                f"\033[31m   Unknown transition to '{out_name}'\033[0m",
-                                flush=True,
-                            )
-                            raise IndexError(
-                                f"Failed to remove '{state.name}' with transition to '{out_name}'"
-                            )
-                        next_state.incoming.remove(state.name)
-
-                    removed_state = sa.pop(state.name)
-                    if removed_state is not state:
-                        raise ValueError(
-                            f"Removed wrong state instance for '{state.name}'."
-                        )
-                    removed_one = True
-
+            self._prune_unreachable_states(sa)
             sa.update_state_map()
             print('Now process automaton and identify identical states ...', flush=True)
 
@@ -139,132 +287,28 @@ class SlugsSMReducer(BaseProcess):
                     flush=True,
                 )
 
-            state_keys = list(sa)
-            for idx, name in enumerate(state_keys):
-                state = sa[name]
-                if state is None:
-                    if self.verbose:
-                        print(
-                            f"    Already removed '{name}' from this automaton ...", flush=True
-                        )
-                    continue
+            sweeps_completed = 0
+            sweeps_started_at = time.perf_counter()
+            while max_sweeps is None or sweeps_completed < max_sweeps:
+                sweeps_completed += 1
+                changed = self._merge_equivalent_states_once(sa, pending_mask)
+                sa.update_state_map()
+                if not changed:
+                    break
+            sweeps_elapsed_s = time.perf_counter() - sweeps_started_at
+            if max_sweeps is not None and sweeps_completed == max_sweeps and changed:
+                print(
+                    f'Reduction stopped after max sweeps '
+                    f'({sweeps_completed}); elapsed {sweeps_elapsed_s:.6f}s.',
+                    flush=True,
+                )
+            else:
+                print(
+                    f'Reduction reached fixed point after {sweeps_completed} '
+                    f'sweep(s); elapsed {sweeps_elapsed_s:.6f}s.',
+                    flush=True,
+                )
 
-                if self.verbose:
-                    print(f"    Checking '{state.name}' for equivalents ...", flush=True)
-                for idx2 in range(idx + 1, len(state_keys)):
-                    other_name = state_keys[idx2]
-                    state2 = sa[other_name]
-                    if state2 is None or not state.equals(state2, pending_mask,
-                                                          verbose=self.verbose):
-                        continue
-
-                    if self.verbose:
-                        print(
-                            f"    Removing equivalent state {idx2} '{state2.name}' to '{state.name}'",
-                            flush=True,
-                        )
-
-                    for incoming_name in state2.incoming:
-                        state3 = sa[incoming_name]
-                        if state3 is None:
-                            print(
-                                f"\033[31mFailed to remove '{state2.name}' equal "
-                                f"to '{state.name}'\033[0m",
-                                flush=True,
-                            )
-                            print(
-                                f"\033[31m   Unknown transition from '{incoming_name}'\033[0m",
-                                flush=True,
-                            )
-                            raise IndexError(
-                                f"Failed to remove '{state2.name}' equal to '{state.name}'"
-                            )
-
-                        for idx3, trans in enumerate(state3.transitions):
-                            if trans != state2.name:
-                                continue
-                            if self.verbose:
-                                print(
-                                    f"        Updating '{state3.name}' transition {idx3} "
-                                    f"({state3.transitions[idx3]}) with '{state.name}'",
-                                    flush=True,
-                                )
-                            state3.transitions[idx3] = state.name
-                            if state3.name not in state.incoming:
-                                if self.verbose:
-                                    print(
-                                        f"    Adding '{state3.name}' to incoming list "
-                                        f"for '{state.name}'",
-                                        flush=True,
-                                    )
-                                state.incoming.append(state3.name)
-
-                        # Keep state3's per-outcome routing labels pointed at the
-                        # surviving name too, or a later merge test involving state3
-                        # would compare a stale target name that no longer exists.
-                        state3.outcome_targets = {
-                            label: (state.name if target == state2.name else target)
-                            for label, target in state3.outcome_targets.items()
-                        }
-
-                    # equals() judges merge eligibility by outcome_targets, a dict
-                    # keyed by outcome_signature() -- equal length here relies on
-                    # outcome_signature() never colliding across a state's own
-                    # outgoing edges. Check explicitly so a violation of that
-                    # invariant is a clear diagnostic, not a bare IndexError.
-                    if len(state.transitions) != len(state2.transitions):
-                        raise ValueError(
-                            f"Cannot merge '{state.name}' and '{state2.name}': "
-                            'equal outcome_targets but different transition counts '
-                            f'({len(state.transitions)} vs {len(state2.transitions)}). '
-                            'Two transitions from the same state must be colliding on '
-                            'outcome_signature().'
-                        )
-                    for idx3, out_name in enumerate(state2.transitions):
-                        if state.transitions[idx3] != out_name:
-                            raise ValueError(
-                                f"Mismatch on transitions for '{state.name}' "
-                                f"and '{state2.name}'"
-                            )
-                        state3 = sa[out_name]
-                        if state3 is None:
-                            print(
-                                f"\033[31mFailed to remove '{state2.name}' equal "
-                                f"to '{state.name}'\033[0m",
-                                flush=True,
-                            )
-                            print(
-                                f"\033[31m   Unknown transition to '{out_name}'\033[0m",
-                                flush=True,
-                            )
-                            raise IndexError(
-                                f"Failed to remove '{state2.name}' equal to '{state.name}'"
-                            )
-
-                        for idx4, trans in enumerate(state3.incoming):
-                            if trans == state2.name:
-                                if self.verbose:
-                                    print(
-                                        f"        Updating '{state3.name}' incoming "
-                                        f"[{idx4}] ({state3.incoming[idx4]}) with '{state.name}'",
-                                        flush=True,
-                                    )
-                                state3.incoming[idx4] = state.name
-
-                    # Preserve all activation predicates carried by equivalent states.
-                    state.input_variables = sorted(
-                        set(state.input_variables + state2.input_variables)
-                    )
-                    if state2.is_initial:
-                        state.is_initial = True
-
-                    removed_state = sa.pop(state2.name)
-                    if removed_state is not state2:
-                        raise ValueError(
-                            f"Removed wrong state instance for '{state2.name}'."
-                        )
-
-            sa.update_state_map()
             print(f'Ending with reduced {sa} ...', flush=True)
             reduced_automaton = sa.to_dict()
             reduced_automaton['reduced_automaton'] = True
@@ -287,6 +331,7 @@ def main(inputs):
     return SlugsSMReducer(
         name='SlugsSMReducer',
         synthesized_automaton=inputs[0],
+        max_reduction_sweeps=inputs[1] if len(inputs) > 1 else None,
     )
 
 
