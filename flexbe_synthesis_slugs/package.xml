@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>flexbe_synthesis_slugs</name>
-  <version>0.0.1</version>
+  <version>0.0.2</version>
   <description>
       Slugs-based GR(1) synthesis backend, specification helpers, and state machine generation for FlexBE Synthesis.
   </description>
